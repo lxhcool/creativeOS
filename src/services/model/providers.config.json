@@ -1,0 +1,165 @@
+{
+  "providers": [
+    {
+      "id": "openai",
+      "name": "GPT 官方",
+      "type": "openai",
+      "enabled": true,
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "models": [
+        {
+          "id": "gpt-4.1",
+          "capabilities": ["text", "tool_calling", "json"],
+          "contextWindow": 1048576,
+          "maxOutputTokens": 32768,
+          "costPer1kInput": 0.002,
+          "costPer1kOutput": 0.008
+        },
+        {
+          "id": "gpt-4.1-mini",
+          "capabilities": ["text", "tool_calling", "json"],
+          "contextWindow": 1048576,
+          "maxOutputTokens": 32768,
+          "costPer1kInput": 0.0004,
+          "costPer1kOutput": 0.0016
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "name": "Claude 官方",
+      "type": "anthropic",
+      "enabled": true,
+      "baseUrl": "https://api.anthropic.com/v1",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "capabilities": ["text", "tool_calling", "json", "vision"],
+          "contextWindow": 200000,
+          "maxOutputTokens": 32768,
+          "costPer1kInput": 0.015,
+          "costPer1kOutput": 0.075
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "capabilities": ["text", "tool_calling", "json", "vision"],
+          "contextWindow": 200000,
+          "maxOutputTokens": 16384,
+          "costPer1kInput": 0.003,
+          "costPer1kOutput": 0.015
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "capabilities": ["text", "tool_calling", "json"],
+          "contextWindow": 200000,
+          "maxOutputTokens": 8192,
+          "costPer1kInput": 0.0008,
+          "costPer1kOutput": 0.004
+        }
+      ]
+    },
+    {
+      "id": "google",
+      "name": "Google Gemini",
+      "type": "google",
+      "enabled": false,
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "apiKeyEnv": "GOOGLE_API_KEY",
+      "models": [
+        {
+          "id": "gemini-2.5-pro",
+          "capabilities": ["text", "tool_calling", "json", "vision"],
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "costPer1kInput": 0.00125,
+          "costPer1kOutput": 0.005
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "capabilities": ["text", "tool_calling", "json", "vision"],
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "costPer1kInput": 0.00015,
+          "costPer1kOutput": 0.0006
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "type": "openai_compatible",
+      "enabled": false,
+      "baseUrl": "https://api.deepseek.com",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "capabilities": ["text", "json"],
+          "contextWindow": 65536,
+          "maxOutputTokens": 8192,
+          "costPer1kInput": 0.00027,
+          "costPer1kOutput": 0.0011
+        }
+      ]
+    },
+    {
+      "id": "siliconflow",
+      "name": "硅基流动",
+      "type": "openai_compatible",
+      "enabled": false,
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "apiKeyEnv": "SILICONFLOW_API_KEY",
+      "models": [
+        {
+          "id": "deepseek-ai/DeepSeek-V3",
+          "capabilities": ["text", "json", "tool_calling"],
+          "contextWindow": 65536,
+          "maxOutputTokens": 8192
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-R1",
+          "capabilities": ["text", "json"],
+          "contextWindow": 65536,
+          "maxOutputTokens": 8192
+        },
+        {
+          "id": "Qwen/Qwen3-235B-A22B",
+          "capabilities": ["text", "json", "tool_calling"],
+          "contextWindow": 32768,
+          "maxOutputTokens": 8192
+        }
+      ]
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "type": "openai_compatible",
+      "enabled": false,
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKeyEnv": "OLLAMA_API_KEY",
+      "models": [
+        {
+          "id": "qwen3",
+          "capabilities": ["text", "tool_calling", "json"],
+          "contextWindow": 32768,
+          "maxOutputTokens": 8192
+        },
+        {
+          "id": "llama4",
+          "capabilities": ["text", "json"],
+          "contextWindow": 32768,
+          "maxOutputTokens": 8192
+        }
+      ]
+    }
+  ],
+  "routing": {
+    "planner": ["anthropic:claude-sonnet-4-6", "openai:gpt-4.1", "deepseek:deepseek-chat"],
+    "cheap_text": ["deepseek:deepseek-chat", "openai:gpt-4.1-mini"],
+    "structured_json": ["openai:gpt-4.1", "anthropic:claude-sonnet-4-6"],
+    "vision": ["anthropic:claude-sonnet-4-6", "google:gemini-2.5-pro"],
+    "fallback": ["deepseek:deepseek-chat", "openai:gpt-4.1-mini", "ollama:qwen3"]
+  }
+}
