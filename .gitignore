@@ -23,6 +23,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .next-dev.err
+/.run/
 
 # local env files
 .env*.local
