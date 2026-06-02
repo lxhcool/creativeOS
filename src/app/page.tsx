@@ -111,14 +111,11 @@ export default function Home() {
                 style={{ top: "calc(100% + 48px)" }}
               >
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-white/90">最近项目</h2>
+                  <h2 className="text-sm font-semibold text-white/90">快捷入口</h2>
                   <span className="text-[10px] uppercase tracking-[0.2em] text-white/[0.35]">
-                    Recent
+                    Quick
                   </span>
                 </div>
-                <p className="text-xs leading-6 text-white/[0.38]">
-                  暂无项目，创建你的第一个画布开始创作。
-                </p>
               </div>
             </div>
         </header>
@@ -129,30 +126,26 @@ export default function Home() {
               {isAuthenticated ? "欢迎回来" : "开始创作"}
             </h1>
             <p className="mt-5 max-w-md text-sm leading-7 text-white/[0.62] sm:text-base">
-              释放灵感，创造无限可能。AI 驱动的创作空间，让每一个想法从空白画布开始生长。
+              释放灵感，创造无限可能。
             </p>
 
             <div className="mt-9 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  isAuthenticated ? undefined : setAuthMode("register")
-                }
+                onClick={() => {
+                  if (isAuthenticated) {
+                    window.location.href = "/settings/profile";
+                    return;
+                  }
+
+                  setAuthMode("register");
+                }}
                 className="group rounded-3xl border border-white/[0.14] bg-white/[0.13] px-5 py-[11px] text-sm font-medium text-white shadow-2xl shadow-black/25 backdrop-blur-2xl transition cursor-pointer hover:-translate-y-0.5 hover:bg-white/[0.18]"
               >
-                新建画布
+                进入主页
                 <span className="ml-2 text-white/50 transition group-hover:text-white">
                   +
                 </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isAuthenticated) setAuthMode("login");
-                }}
-                className="rounded-3xl border border-white/10 bg-black/[0.16] px-5 py-[11px] text-sm font-medium text-white/[0.82] shadow-2xl shadow-black/20 backdrop-blur-2xl transition cursor-pointer hover:-translate-y-0.5 hover:bg-white/10 hover:text-white"
-              >
-                {isAuthenticated ? "打开空白首页" : "登录继续"}
               </button>
             </div>
           </div>
