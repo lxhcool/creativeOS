@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { GameAssetWorkflowPanel } from "@/components/workspace/GameAssetWorkflowPanel";
 import { useAuthStore } from "@/stores/useAuthStore";
 
 export default function EmptyPage() {
@@ -22,5 +23,5 @@ export default function EmptyPage() {
     );
   }
 
-  return <main className="min-h-screen bg-bg-primary" />;
+  return <GameAssetWorkflowPanel />;
 }
