@@ -59,7 +59,7 @@ export function GameAssetWorkflowPanel() {
             游戏资产工作流
           </h1>
           <p className="mt-3 text-sm leading-6 text-white/55">
-            当前验证的是 Dify Planner + 本地 Tool Executor 架构。这里先用本地 planner 模拟 AgentPlan，后面可直接替换成 Dify。
+            当前走正式产品逻辑：大模型 / Agent 负责理解输入并规划 AgentPlan，本地 Tool Executor 负责生成骨架资产、节点和 Canvas2D 预览。
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">
@@ -188,9 +188,8 @@ function ModelRuleNote() {
     <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.05] p-4 text-xs leading-5 text-white/48">
       <p className="font-medium text-white/70">模型选择规则</p>
       <p className="mt-2">
-        当前页面先用本地 planner 验证流程，不消耗模型。接 Dify 后，Planner 模型由 Dify 工作流配置决定；CreativeOS 内部直连模型时才走 Model Gateway 的 routing chain。
+        如果配置了 Dify，Planner 由 Dify 工作流决定模型；否则走 CreativeOS Model Gateway 的 `planner` 路由链。当前阶段不调用生图模型。
       </p>
     </div>
   );
 }
-
