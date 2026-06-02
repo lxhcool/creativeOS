@@ -1,13 +1,13 @@
 import type { AgentPlan } from "@/services/game-assets";
-import type { AgentProvider, GameAssetPlanInput } from "./types";
+import type { AgentPlanRun, AgentProvider, GameAssetPlanInput } from "./types";
 
 export class LocalGameAssetPlanner implements AgentProvider {
-  async runGameAssetPlan(input: GameAssetPlanInput): Promise<AgentPlan> {
+  async runGameAssetPlan(input: GameAssetPlanInput): Promise<AgentPlanRun> {
     const lowerPrompt = input.userPrompt.toLowerCase();
     const wantsScene = /scene|forest|background|场景|森林|背景/.test(lowerPrompt);
     const kind = inferCharacterKind(lowerPrompt);
 
-    return {
+    const plan: AgentPlan = {
       version: "1",
       intent: "create_game_asset_workflow",
       summary: `Create a ${kind} character workflow${wantsScene ? " with a simple scene" : ""}.`,
@@ -54,6 +54,11 @@ export class LocalGameAssetPlanner implements AgentProvider {
         },
       ],
     };
+
+    return {
+      plan,
+      source: "local",
+    };
   }
 }
 
@@ -63,4 +68,3 @@ function inferCharacterKind(prompt: string): string {
   if (/mage|wizard|法师|魔法/.test(prompt)) return "mage";
   return "adventurer";
 }
-

@@ -1,5 +1,5 @@
-import { agentPlanSchema, type AgentPlan } from "@/services/game-assets";
-import type { AgentProvider, GameAssetPlanInput } from "./types";
+import { agentPlanSchema } from "@/services/game-assets";
+import type { AgentPlanRun, AgentProvider, GameAssetPlanInput } from "./types";
 
 export interface DifyAgentProviderConfig {
   endpoint: string;
@@ -24,7 +24,7 @@ export class DifyAgentProvider implements AgentProvider {
   async runGameAssetPlan(
     input: GameAssetPlanInput,
     signal?: AbortSignal,
-  ): Promise<AgentPlan> {
+  ): Promise<AgentPlanRun> {
     const response = await fetch(this.config.endpoint, {
       method: "POST",
       headers: {
@@ -45,7 +45,10 @@ export class DifyAgentProvider implements AgentProvider {
     }
 
     const payload = await response.json() as DifyWorkflowResponse;
-    return agentPlanSchema.parse(extractPlan(payload));
+    return {
+      plan: agentPlanSchema.parse(extractPlan(payload)),
+      source: "dify",
+    };
   }
 }
 
@@ -66,4 +69,3 @@ function extractPlan(payload: DifyWorkflowResponse): unknown {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-

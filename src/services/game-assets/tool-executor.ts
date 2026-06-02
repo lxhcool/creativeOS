@@ -27,6 +27,11 @@ export interface ToolExecutionContext {
 
 export interface ToolExecutionResult {
   plan: AgentPlan;
+  planner?: {
+    source: "dify" | "model_gateway" | "local";
+    providerId?: string;
+    modelId?: string;
+  };
   assets: AssetLibrary;
   board: Board;
   createdAssetIds: string[];

@@ -6,7 +6,13 @@ export interface GameAssetPlanInput {
   projectId: string;
 }
 
-export interface AgentProvider {
-  runGameAssetPlan(input: GameAssetPlanInput, signal?: AbortSignal): Promise<AgentPlan>;
+export interface AgentPlanRun {
+  plan: AgentPlan;
+  source: "dify" | "model_gateway" | "local";
+  providerId?: string;
+  modelId?: string;
 }
 
+export interface AgentProvider {
+  runGameAssetPlan(input: GameAssetPlanInput, signal?: AbortSignal): Promise<AgentPlanRun>;
+}

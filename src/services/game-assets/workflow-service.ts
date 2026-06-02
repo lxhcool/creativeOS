@@ -11,13 +11,20 @@ export interface GenerateGameAssetWorkflowOptions {
 export async function generateGameAssetWorkflow(
   options: GenerateGameAssetWorkflowOptions,
 ): Promise<ToolExecutionResult> {
-  const plan = await options.agentProvider.runGameAssetPlan(options.input, options.signal);
+  const planRun = await options.agentProvider.runGameAssetPlan(options.input, options.signal);
   const executor = options.executor ?? new ToolExecutor();
-
-  return executor.executePlan(plan, {
+  const result = executor.executePlan(planRun.plan, {
     workspaceId: options.input.workspaceId,
     projectId: options.input.projectId,
     boardName: "游戏资产工作流",
   });
-}
 
+  return {
+    ...result,
+    planner: {
+      source: planRun.source,
+      providerId: planRun.providerId,
+      modelId: planRun.modelId,
+    },
+  };
+}

@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/Button";
 import type { ToolExecutionResult } from "@/services/game-assets";
+import { buildGatewayConfigFromSettings } from "@/services/model/user-config";
+import { useProviderStore } from "@/stores/useProviderStore";
 
 const NODE_LABELS: Record<string, string> = {
   character: "角色",
@@ -13,11 +15,57 @@ const NODE_LABELS: Record<string, string> = {
   compositionPreview: "组合预览",
 };
 
+interface PlannerModelOption {
+  ref: string;
+  label: string;
+}
+
 export function GameAssetWorkflowPanel() {
+  const {
+    providers,
+    models,
+    routingRules,
+    isLoaded,
+    loadProviders,
+  } = useProviderStore();
   const [prompt, setPrompt] = useState("生成一个弓箭手和森林场景");
+  const [plannerModelRef, setPlannerModelRef] = useState("auto");
   const [result, setResult] = useState<ToolExecutionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!isLoaded) {
+      void loadProviders();
+    }
+  }, [isLoaded, loadProviders]);
+
+  const gatewayConfig = useMemo(() => {
+    if (!isLoaded) return undefined;
+    return buildGatewayConfigFromSettings({
+      providers,
+      models,
+      routingRules,
+    });
+  }, [isLoaded, models, providers, routingRules]);
+
+  const plannerModelOptions = useMemo<PlannerModelOption[]>(() => {
+    if (!gatewayConfig) return [];
+
+    return gatewayConfig.providers.flatMap((provider) =>
+      provider.enabled
+        ? provider.models
+            .filter((model) =>
+              model.capabilities.includes("text") &&
+              model.capabilities.includes("json"),
+            )
+            .map((model) => ({
+              ref: `${provider.id}:${model.id}`,
+              label: `${provider.name ?? provider.id} / ${model.id}`,
+            }))
+        : [],
+    );
+  }, [gatewayConfig]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,6 +80,8 @@ export function GameAssetWorkflowPanel() {
             userPrompt: prompt,
             workspaceId: "local_workspace",
             projectId: "local_project",
+            gatewayConfig,
+            plannerModelRef: plannerModelRef === "auto" ? undefined : plannerModelRef,
           }),
         });
 
@@ -73,14 +123,40 @@ export function GameAssetWorkflowPanel() {
               className="min-h-32 w-full resize-none rounded-3xl border border-white/10 bg-white/[0.07] p-4 text-sm leading-6 text-white outline-none transition focus:border-amber-200/40 focus:bg-white/[0.1]"
               placeholder="例如：生成一个弓箭手和森林场景"
             />
+            <label className="block text-sm text-white/70" htmlFor="planner-model">
+              Planner 模型
+            </label>
+            <select
+              id="planner-model"
+              value={plannerModelRef}
+              onChange={(event) => setPlannerModelRef(event.target.value)}
+              className="w-full rounded-3xl border border-white/10 bg-white/[0.07] px-4 py-3 text-sm text-white outline-none transition focus:border-amber-200/40 focus:bg-white/[0.1]"
+              disabled={!isLoaded}
+            >
+              <option className="bg-[#17140f]" value="auto">
+                自动选择
+              </option>
+              {plannerModelOptions.map((option) => (
+                <option
+                  key={option.ref}
+                  className="bg-[#17140f]"
+                  value={option.ref}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs leading-5 text-white/40">
+              自动模式会从已启用模型中选择具备 text + json 能力的模型。只配置 DeepSeek 时，会自动使用 DeepSeek。
+            </p>
             <Button
               type="submit"
               variant="primary"
               loading={isPending}
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() || !isLoaded}
               className="w-full"
             >
-              生成工作流
+              {isLoaded ? "生成工作流" : "加载模型配置中"}
             </Button>
           </form>
 
@@ -102,8 +178,13 @@ export function GameAssetWorkflowPanel() {
               </h2>
             </div>
             {result && (
-              <div className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/60">
-                {result.createdAssetIds.length} 个资产 · {result.board.nodes.length} 个节点
+              <div className="space-y-2 text-right">
+                <div className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2 text-sm text-white/60">
+                  {result.createdAssetIds.length} 个资产 · {result.board.nodes.length} 个节点
+                </div>
+                <div className="text-xs text-white/42">
+                  Planner: {formatPlanner(result)}
+                </div>
               </div>
             )}
           </div>
@@ -192,4 +273,11 @@ function ModelRuleNote() {
       </p>
     </div>
   );
+}
+
+function formatPlanner(result: ToolExecutionResult): string {
+  if (!result.planner) return "unknown";
+  if (result.planner.source === "dify") return "Dify Workflow";
+  if (result.planner.source === "local") return "Local Planner";
+  return `${result.planner.providerId ?? "unknown"}:${result.planner.modelId ?? "unknown"}`;
 }

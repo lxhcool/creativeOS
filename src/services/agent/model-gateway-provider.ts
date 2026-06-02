@@ -1,6 +1,6 @@
-import { agentPlanSchema, type AgentPlan } from "@/services/game-assets";
-import { getModelGateway } from "@/services/model";
-import type { AgentProvider, GameAssetPlanInput } from "./types";
+import { agentPlanSchema } from "@/services/game-assets";
+import { getModelGateway, ModelGateway, type ModelGatewayConfig } from "@/services/model";
+import type { AgentPlanRun, AgentProvider, GameAssetPlanInput } from "./types";
 
 const SYSTEM_PROMPT = `
 你是 CreativeOS 的游戏资产工作流 Planner。
@@ -63,11 +63,17 @@ AgentPlan:
 `.trim();
 
 export class ModelGatewayAgentProvider implements AgentProvider {
+  private readonly config?: ModelGatewayConfig;
+
+  constructor(config?: ModelGatewayConfig) {
+    this.config = config;
+  }
+
   async runGameAssetPlan(
     input: GameAssetPlanInput,
     signal?: AbortSignal,
-  ): Promise<AgentPlan> {
-    const gateway = getModelGateway();
+  ): Promise<AgentPlanRun> {
+    const gateway = this.config ? new ModelGateway(this.config) : getModelGateway();
     const result = await gateway.generateJson({
       task: "planner",
       schema: agentPlanSchema,
@@ -79,7 +85,12 @@ export class ModelGatewayAgentProvider implements AgentProvider {
       signal,
     });
 
-    return result.data;
+    return {
+      plan: result.data,
+      source: "model_gateway",
+      providerId: result.providerId,
+      modelId: result.modelId,
+    };
   }
 }
 
@@ -90,4 +101,3 @@ function buildPrompt(input: GameAssetPlanInput): string {
     `userPrompt: ${input.userPrompt}`,
   ].join("\n");
 }
-
