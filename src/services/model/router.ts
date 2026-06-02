@@ -15,7 +15,7 @@ type TaskCapabilityMap = Record<string, ModelCapability[]>;
  * These ensure even unconfigured tasks get a sensible model.
  */
 const DEFAULT_TASK_CAPABILITIES: TaskCapabilityMap = {
-  planner: ["text", "tool_calling", "json"],
+  planner: ["text", "json"],
   cheap_text: ["text"],
   structured_json: ["text", "json"],
   vision: ["text", "vision"],

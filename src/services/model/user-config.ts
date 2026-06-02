@@ -65,7 +65,10 @@ export function mergeProviderSettings(
     getBuiltInProviderSettings();
 
   const persistedProviderMap = new Map(
-    persistedProviders.map((provider) => [provider.id, provider]),
+    persistedProviders.map((provider) => [
+      provider.id,
+      normalizeRuntimeProviderState(provider),
+    ]),
   );
 
   const mergedProviders = builtInProviders.map(
@@ -74,7 +77,7 @@ export function mergeProviderSettings(
 
   for (const provider of persistedProviders) {
     if (!mergedProviders.some((entry) => entry.id === provider.id)) {
-      mergedProviders.push(provider);
+      mergedProviders.push(normalizeRuntimeProviderState(provider));
     }
   }
 
@@ -110,6 +113,17 @@ export function mergeProviderSettings(
   }
 
   return { providers: mergedProviders, models: mergedModels };
+}
+
+function normalizeRuntimeProviderState(provider: UserProvider): UserProvider {
+  if (provider.apiKey.trim().length > 0) {
+    return provider;
+  }
+
+  return {
+    ...provider,
+    enabled: false,
+  };
 }
 
 function toProviderConfig(

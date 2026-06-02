@@ -56,6 +56,7 @@ export function ProviderCard({
   onDeleteModel,
 }: ProviderCardProps) {
   const enabledModels = models.filter((model) => model.enabled);
+  const isRunnable = provider.enabled && provider.apiKey.trim().length > 0;
 
   return (
     <article
@@ -122,9 +123,9 @@ export function ProviderCard({
       <div className="mb-3 flex items-center gap-2 text-xs">
         <span className="text-white/45">状态</span>
         <span
-          className={provider.enabled ? "text-emerald-200" : "text-white/40"}
+          className={isRunnable ? "text-emerald-200" : "text-white/40"}
         >
-          {provider.enabled ? "已启用" : "已停用"}
+          {isRunnable ? "已启用" : provider.apiKey ? "已停用" : "缺少 API Key"}
         </span>
         <button
           type="button"

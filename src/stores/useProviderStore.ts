@@ -245,10 +245,11 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
   setProviderEnabled: async (id, enabled) => {
     const provider = get().providers.find((entry) => entry.id === id);
     if (!provider) return;
+    const nextEnabled = enabled && provider.apiKey.trim().length > 0;
 
     const updated: UserProvider = {
       ...provider,
-      enabled,
+      enabled: nextEnabled,
       updatedAt: new Date().toISOString(),
     };
 

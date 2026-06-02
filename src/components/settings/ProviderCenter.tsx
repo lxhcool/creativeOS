@@ -55,7 +55,7 @@ export function ProviderCenter() {
 
   const stats = useMemo(() => {
     const enabledProviders = providers.filter(
-      (provider) => provider.enabled,
+      (provider) => provider.enabled && provider.apiKey.trim().length > 0,
     ).length;
     const allModels = Object.values(models).flat();
     const enabledModels = allModels.filter((model) => model.enabled).length;
