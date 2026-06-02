@@ -53,7 +53,7 @@ export function GameAssetWorkflowPanel() {
     if (!gatewayConfig) return [];
 
     return gatewayConfig.providers.flatMap((provider) =>
-      provider.enabled
+      provider.enabled && provider.apiKey
         ? provider.models
             .filter((model) =>
               model.capabilities.includes("text") &&

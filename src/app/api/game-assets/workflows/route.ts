@@ -96,16 +96,17 @@ function normalizePlannerRouting(
   config: ModelGatewayConfig,
   plannerModelRef?: string,
 ): ModelGatewayConfig {
+  const availableProviders = config.providers.filter((provider) =>
+    provider.enabled && Boolean(provider.apiKey?.trim() || provider.apiKeyEnv),
+  );
   const modelRefs = new Set(
-    config.providers.flatMap((provider) =>
-      provider.enabled
-        ? provider.models
-            .filter((model) =>
-              model.capabilities.includes("text") &&
-              model.capabilities.includes("json"),
-            )
-            .map((model) => `${provider.id}:${model.id}`)
-        : [],
+    availableProviders.flatMap((provider) =>
+      provider.models
+        .filter((model) =>
+          model.capabilities.includes("text") &&
+          model.capabilities.includes("json"),
+        )
+        .map((model) => `${provider.id}:${model.id}`),
     ),
   );
 
@@ -117,11 +118,11 @@ function normalizePlannerRouting(
       : [];
 
   return {
-    providers: config.providers,
+    providers: availableProviders,
     routing: {
       ...config.routing,
       planner: [
-        ...(plannerModelRef ? [plannerModelRef] : []),
+        ...(plannerModelRef && modelRefs.has(plannerModelRef) ? [plannerModelRef] : []),
         ...existingRefs.filter((ref) => ref !== plannerModelRef),
         ...[...modelRefs].filter((ref) =>
           ref !== plannerModelRef && !existingRefs.includes(ref),

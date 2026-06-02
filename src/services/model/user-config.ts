@@ -28,7 +28,7 @@ export function getBuiltInProviderSettings(): {
     type: provider.type,
     baseUrl: provider.baseUrl,
     apiKey: "",
-    enabled: provider.enabled,
+    enabled: false,
     createdAt: "",
     updatedAt: "",
     isBuiltIn: true,
@@ -144,7 +144,7 @@ export function buildGatewayConfigFromSettings(params: {
   const baseConfig = structuredClone(defaultConfig) as ModelGatewayConfig;
 
   const providers = params.providers
-    .filter((provider) => provider.enabled)
+    .filter((provider) => provider.enabled && provider.apiKey.trim().length > 0)
     .map((provider) => toProviderConfig(provider, params.models[provider.id] || []))
     .filter((provider) => provider.models.length > 0);
 
