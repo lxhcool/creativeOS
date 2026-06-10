@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { LogOut, Settings } from "lucide-react";
+import { LogOut, Palette, Settings } from "lucide-react";
 import { useState } from "react";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { RegisterForm } from "@/components/auth/RegisterForm";
@@ -130,23 +130,13 @@ export default function Home() {
             </p>
 
             <div className="mt-9 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (isAuthenticated) {
-                    window.location.href = "/settings/profile";
-                    return;
-                  }
-
-                  setAuthMode("register");
-                }}
-                className="group rounded-3xl border border-white/[0.14] bg-white/[0.13] px-5 py-[11px] text-sm font-medium text-white shadow-2xl shadow-black/25 backdrop-blur-2xl transition cursor-pointer hover:-translate-y-0.5 hover:bg-white/[0.18]"
+              <Link
+                href="/canvas"
+                className="group inline-flex h-11 items-center gap-2 rounded-3xl border border-white/[0.14] bg-white/[0.13] px-5 text-sm font-medium text-white shadow-2xl shadow-black/25 backdrop-blur-2xl transition cursor-pointer hover:-translate-y-0.5 hover:bg-white/[0.18]"
               >
-                进入主页
-                <span className="ml-2 text-white/50 transition group-hover:text-white">
-                  +
-                </span>
-              </button>
+                <Palette className="h-4 w-4 text-sky-200" />
+                自由画布
+              </Link>
             </div>
           </div>
         </section>

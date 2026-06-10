@@ -1,17 +1,19 @@
 /**
- * Server-side Session Store (in-memory).
+ * Server-side Session Store (signed cookie).
  *
- * Sessions are stored in a Map with auto-cleanup.
- * Session cookie: HttpOnly, Secure, Lax, 30-day expiry.
- *
- * For production: replace with Redis or database-backed sessions.
+ * This avoids in-memory session loss during local dev restarts and hot reloads.
  */
 
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
 const SESSION_COOKIE_NAME = "creativeos_sid";
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const SESSION_RENEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // Renew if < 7 days remaining
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_RENEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_SECRET =
+  process.env["AUTH_SESSION_SECRET"] ||
+  process.env["NEXTAUTH_SECRET"] ||
+  "creativeos-dev-session-secret";
 
 export interface SessionData {
   id: string;
@@ -23,20 +25,25 @@ export interface SessionData {
   userAgent?: string;
 }
 
-const sessions = new Map<string, SessionData>();
+interface SessionTokenPayload {
+  id: string;
+  userId: string;
+  email: string;
+  createdAt: number;
+  expiresAt: number;
+  ipAddress?: string;
+  userAgent?: string;
+}
 
-/** Create a session and set the HttpOnly cookie */
 export async function createSession(params: {
   userId: string;
   email: string;
   ipAddress?: string;
   userAgent?: string;
 }): Promise<SessionData> {
-  const id = generateToken(48);
   const now = Date.now();
-
   const session: SessionData = {
-    id,
+    id: generateSessionId(now, params.userId),
     userId: params.userId,
     email: params.email,
     createdAt: now,
@@ -45,63 +52,52 @@ export async function createSession(params: {
     userAgent: params.userAgent,
   };
 
-  sessions.set(id, session);
+  await writeSessionCookie(session);
+  return session;
+}
 
-  // Set HttpOnly cookie
+export async function getSession(): Promise<SessionData | null> {
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE_NAME, id, {
+  const raw = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+
+  if (!raw) return null;
+
+  const session = verifySessionToken(raw);
+  if (!session) {
+    await clearSessionCookie();
+    return null;
+  }
+
+  if (Date.now() > session.expiresAt) {
+    await clearSessionCookie();
+    return null;
+  }
+
+  if (session.expiresAt - Date.now() < SESSION_RENEW_THRESHOLD_MS) {
+    const renewed: SessionData = {
+      ...session,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    };
+    await writeSessionCookie(renewed);
+    return renewed;
+  }
+
+  return session;
+}
+
+export async function destroySession(): Promise<void> {
+  await clearSessionCookie();
+}
+
+async function writeSessionCookie(session: SessionData): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE_NAME, signSessionToken(session), {
     httpOnly: true,
     secure: process.env["NODE_ENV"] === "production",
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_TTL_MS / 1000,
   });
-
-  return session;
-}
-
-/** Get the current session from the request cookie */
-export async function getSession(): Promise<SessionData | null> {
-  const cookieStore = await cookies();
-  const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-
-  if (!sessionId) return null;
-
-  const session = sessions.get(sessionId);
-  if (!session) return null;
-
-  // Check expiry
-  if (Date.now() > session.expiresAt) {
-    sessions.delete(sessionId);
-    await clearSessionCookie();
-    return null;
-  }
-
-  // Auto-renew if within threshold
-  if (session.expiresAt - Date.now() < SESSION_RENEW_THRESHOLD_MS) {
-    session.expiresAt = Date.now() + SESSION_TTL_MS;
-    cookieStore.set(SESSION_COOKIE_NAME, sessionId, {
-      httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_TTL_MS / 1000,
-    });
-  }
-
-  return session;
-}
-
-/** Destroy the current session and clear the cookie */
-export async function destroySession(): Promise<void> {
-  const cookieStore = await cookies();
-  const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-
-  if (sessionId) {
-    sessions.delete(sessionId);
-  }
-
-  await clearSessionCookie();
 }
 
 async function clearSessionCookie(): Promise<void> {
@@ -111,28 +107,81 @@ async function clearSessionCookie(): Promise<void> {
     secure: process.env["NODE_ENV"] === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 0, // Delete immediately
+    maxAge: 0,
   });
 }
 
-/** Generate a cryptographically random token */
-function generateToken(length: number): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += chars[array[i]! % chars.length];
-  }
-  return result;
+function signSessionToken(session: SessionData): string {
+  const payload = {
+    id: session.id,
+    userId: session.userId,
+    email: session.email,
+    createdAt: session.createdAt,
+    expiresAt: session.expiresAt,
+    ipAddress: session.ipAddress,
+    userAgent: session.userAgent,
+  } satisfies SessionTokenPayload;
+  const payloadEncoded = base64UrlEncode(JSON.stringify(payload));
+  const signature = signValue(payloadEncoded);
+  return `${payloadEncoded}.${signature}`;
 }
 
-// Clean up expired sessions every hour
-if (typeof setInterval !== "undefined") {
-  setInterval(() => {
-    const now = Date.now();
-    for (const [id, session] of sessions) {
-      if (now > session.expiresAt) sessions.delete(id);
+function verifySessionToken(token: string): SessionData | null {
+  const [payloadEncoded, signature] = token.split(".");
+  if (!payloadEncoded || !signature) return null;
+
+  const expected = signValue(payloadEncoded);
+  if (!safeEqual(signature, expected)) return null;
+
+  try {
+    const parsed = JSON.parse(base64UrlDecode(payloadEncoded)) as Partial<SessionTokenPayload>;
+    if (
+      !parsed.id ||
+      !parsed.userId ||
+      !parsed.email ||
+      typeof parsed.createdAt !== "number" ||
+      typeof parsed.expiresAt !== "number"
+    ) {
+      return null;
     }
-  }, 60 * 60 * 1000);
+
+    return {
+      id: parsed.id,
+      userId: parsed.userId,
+      email: parsed.email,
+      createdAt: parsed.createdAt,
+      expiresAt: parsed.expiresAt,
+      ipAddress: parsed.ipAddress,
+      userAgent: parsed.userAgent,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function signValue(value: string): string {
+  return createHmac("sha256", SESSION_SECRET).update(value).digest("base64url");
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf-8").toString("base64url");
+}
+
+function base64UrlDecode(value: string): string {
+  return Buffer.from(value, "base64url").toString("utf-8");
+}
+
+function generateSessionId(now: number, userId: string): string {
+  return createHmac("sha256", SESSION_SECRET)
+    .update(`${userId}:${now}:${Math.random()}`)
+    .digest("base64url");
 }

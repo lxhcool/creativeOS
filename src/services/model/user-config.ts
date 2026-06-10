@@ -1,58 +1,11 @@
 import defaultConfig from "./providers.config.json";
 import type { ModelGatewayConfig, ModelProviderConfig } from "./types";
 import {
-  PROVIDER_TYPE_LABELS,
+  getProviderSupportedKinds,
   type UserModel,
   type UserProvider,
   type UserRoutingRule,
 } from "@/types/provider";
-
-function createStableId(prefix: string, value: string): string {
-  return `${prefix}_${value.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-}
-
-function getProviderDisplayName(
-  provider: ModelGatewayConfig["providers"][number],
-): string {
-  return provider.name || PROVIDER_TYPE_LABELS[provider.type] || provider.id;
-}
-
-export function getBuiltInProviderSettings(): {
-  providers: UserProvider[];
-  models: Record<string, UserModel[]>;
-} {
-  const config = structuredClone(defaultConfig) as ModelGatewayConfig;
-  const providers: UserProvider[] = config.providers.map((provider) => ({
-    id: provider.id,
-    name: getProviderDisplayName(provider),
-    type: provider.type,
-    baseUrl: provider.baseUrl,
-    apiKey: "",
-    enabled: false,
-    createdAt: "",
-    updatedAt: "",
-    isBuiltIn: true,
-  }));
-
-  const models: Record<string, UserModel[]> = {};
-
-  for (const provider of config.providers) {
-    models[provider.id] = provider.models.map((model) => ({
-      id: createStableId("builtin_model", `${provider.id}_${model.id}`),
-      providerId: provider.id,
-      modelName: model.id,
-      displayName: model.id,
-      capabilities: [...model.capabilities],
-      contextWindow: model.contextWindow || 65536,
-      maxOutputTokens: model.maxOutputTokens || 4096,
-      costPer1kInput: model.costPer1kInput,
-      costPer1kOutput: model.costPer1kOutput,
-      enabled: true,
-    }));
-  }
-
-  return { providers, models };
-}
 
 export function mergeProviderSettings(
   persistedProviders: UserProvider[],
@@ -61,67 +14,34 @@ export function mergeProviderSettings(
   providers: UserProvider[];
   models: Record<string, UserModel[]>;
 } {
-  const { providers: builtInProviders, models: builtInModels } =
-    getBuiltInProviderSettings();
-
-  const persistedProviderMap = new Map(
-    persistedProviders.map((provider) => [
+  const providers = persistedProviders.map((provider) =>
+    normalizeRuntimeProviderState({ ...provider, isBuiltIn: false }),
+  );
+  const models = Object.fromEntries(
+    providers.map((provider) => [
       provider.id,
-      normalizeRuntimeProviderState(provider),
+      (persistedModels[provider.id] || []).map((model) => ({
+      ...model,
+      kind: model.kind || "text",
+      })),
     ]),
   );
 
-  const mergedProviders = builtInProviders.map(
-    (provider) => persistedProviderMap.get(provider.id) || provider,
-  );
-
-  for (const provider of persistedProviders) {
-    if (!mergedProviders.some((entry) => entry.id === provider.id)) {
-      mergedProviders.push(normalizeRuntimeProviderState(provider));
-    }
-  }
-
-  const mergedModels: Record<string, UserModel[]> = {};
-  const providerIds = new Set([
-    ...Object.keys(builtInModels),
-    ...Object.keys(persistedModels),
-  ]);
-
-  for (const providerId of providerIds) {
-    const persisted = persistedModels[providerId] || [];
-    const builtIn = builtInModels[providerId] || [];
-
-    if (persisted.length > 0) {
-      const persistedByName = new Map(
-        persisted.map((model) => [model.modelName, model]),
-      );
-      const merged = builtIn.map(
-        (model) => persistedByName.get(model.modelName) || model,
-      );
-
-      for (const model of persisted) {
-        if (!merged.some((entry) => entry.modelName === model.modelName)) {
-          merged.push(model);
-        }
-      }
-
-      mergedModels[providerId] = merged;
-      continue;
-    }
-
-    mergedModels[providerId] = builtIn;
-  }
-
-  return { providers: mergedProviders, models: mergedModels };
+  return { providers, models };
 }
 
 function normalizeRuntimeProviderState(provider: UserProvider): UserProvider {
+  const nextProvider: UserProvider = {
+    ...provider,
+    supportedKinds: getProviderSupportedKinds(provider),
+  };
+
   if (provider.apiKey.trim().length > 0) {
-    return provider;
+    return nextProvider;
   }
 
   return {
-    ...provider,
+    ...nextProvider,
     enabled: false,
   };
 }
@@ -132,13 +52,15 @@ function toProviderConfig(
 ): ModelProviderConfig {
   return {
     id: provider.id,
-    type: provider.type,
+    type:
+      provider.type === "litellm" || provider.type === "openrouter"
+        ? "openai_compatible"
+        : provider.type,
     enabled: provider.enabled,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey || undefined,
-    apiKeyEnv: provider.isBuiltIn ? `${provider.id.toUpperCase()}_API_KEY` : undefined,
     models: models
-      .filter((model) => model.enabled)
+      .filter((model) => model.enabled && (model.kind || "text") === "text")
       .map((model) => ({
         id: model.modelName,
         capabilities: model.capabilities as ModelProviderConfig["models"][number]["capabilities"],

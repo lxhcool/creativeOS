@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import type { DiscoveredModel, ProviderType } from "@/types/provider";
+import type {
+  DiscoveredModel,
+  ModelKind,
+  ProviderType,
+} from "@/types/provider";
 
 interface TestProviderRequest {
   id?: string;
@@ -7,10 +11,17 @@ interface TestProviderRequest {
   type?: ProviderType;
   baseUrl?: string;
   apiKey?: string;
+  kind?: ModelKind;
 }
 
 interface OpenAIModel {
   id?: string;
+  name?: string;
+  display_name?: string;
+  output_modalities?: string[];
+  architecture?: {
+    output_modalities?: string[];
+  };
 }
 
 interface AnthropicModel {
@@ -44,8 +55,12 @@ function getKnownCompatibleModels(params: {
   id?: string;
   name?: string;
   baseUrl: string;
+  kind: ModelKind;
 }): DiscoveredModel[] {
-  const key = `${params.id || ""} ${params.name || ""} ${params.baseUrl}`.toLowerCase();
+  if (params.kind !== "text") return [];
+
+  const key =
+    `${params.id || ""} ${params.name || ""} ${params.baseUrl}`.toLowerCase();
 
   if (key.includes("deepseek") || key.includes("api.deepseek.com")) {
     return [
@@ -66,7 +81,11 @@ function getKnownCompatibleModels(params: {
     ];
   }
 
-  if (key.includes("siliconflow") || key.includes("siliconflow.cn") || key.includes("硅基")) {
+  if (
+    key.includes("siliconflow") ||
+    key.includes("siliconflow.cn") ||
+    key.includes("硅基")
+  ) {
     return [
       {
         modelName: "deepseek-ai/DeepSeek-V3",
@@ -99,6 +118,7 @@ function buildModelRequest(params: {
   type: ProviderType;
   baseUrl: string;
   apiKey: string;
+  kind: ModelKind;
 }): {
   url: string;
   headers: HeadersInit;
@@ -117,7 +137,22 @@ function buildModelRequest(params: {
         url: `${joinUrl(params.baseUrl, "models")}?key=${encodeURIComponent(params.apiKey)}`,
         headers: {},
       };
+    case "openrouter":
+      return {
+        url:
+          params.kind === "video"
+            ? joinUrl(params.baseUrl, "videos/models")
+            : `${joinUrl(params.baseUrl, "models")}${
+                params.kind === "image"
+                  ? "?output_modalities=image"
+                  : ""
+              }`,
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+        },
+      };
     case "openai":
+    case "litellm":
     case "openai_compatible":
     default:
       return {
@@ -127,6 +162,76 @@ function buildModelRequest(params: {
         },
       };
   }
+}
+
+function normalizeModelName(value: string): string {
+  return value.toLowerCase().replace(/[\s._-]+/g, "-");
+}
+
+function hasAny(value: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => value.includes(pattern));
+}
+
+function inferKindFromModelName(modelName: string): ModelKind | "embedding" | undefined {
+  const normalized = normalizeModelName(modelName);
+
+  if (
+    hasAny(normalized, [
+      "embedding",
+      "embed",
+      "text-embedding",
+      "bge-",
+      "e5-",
+      "jina-embeddings",
+    ])
+  ) {
+    return "embedding";
+  }
+
+  if (
+    hasAny(normalized, [
+      "dall-e",
+      "gpt-image",
+      "imagen",
+      "image",
+      "flux",
+      "stable-diffusion",
+      "sdxl",
+      "midjourney",
+    ])
+  ) {
+    return "image";
+  }
+
+  if (
+    hasAny(normalized, [
+      "video",
+      "sora",
+      "veo",
+      "kling",
+      "runway",
+      "luma",
+      "wan-",
+    ])
+  ) {
+    return "video";
+  }
+
+  return undefined;
+}
+
+function modelMatchesKind(modelName: string, modalities: string[] | undefined, kind: ModelKind): boolean {
+  const normalizedModalities = modalities?.map((entry) => entry.toLowerCase());
+  if (normalizedModalities?.length) {
+    return normalizedModalities.includes(kind);
+  }
+
+  const inferredKind = inferKindFromModelName(modelName);
+  if (kind === "text") {
+    return inferredKind !== "image" && inferredKind !== "video" && inferredKind !== "embedding";
+  }
+
+  return inferredKind === kind;
 }
 
 function inferCapabilities(
@@ -164,20 +269,37 @@ function inferCapabilities(
 function normalizeOpenAIModels(
   providerType: ProviderType,
   models: OpenAIModel[],
+  kind: ModelKind,
 ): DiscoveredModel[] {
   return models
-    .map((model) => model.id)
-    .filter((id): id is string => Boolean(id))
-    .map((id) => ({
+    .filter((model) => {
+      const modalities =
+        model.output_modalities || model.architecture?.output_modalities;
+      return model.id && modelMatchesKind(model.id, modalities, kind);
+    })
+    .map((model) => ({
+      id: model.id,
+      displayName: model.name || model.display_name || model.id,
+    }))
+    .filter((model): model is { id: string; displayName: string } =>
+      Boolean(model.id),
+    )
+    .map(({ id, displayName }) => ({
       modelName: id,
-      displayName: id,
-      capabilities: inferCapabilities(providerType, id),
+      displayName,
+      capabilities:
+        kind === "text" ? inferCapabilities(providerType, id) : [kind],
       contextWindow: id.startsWith("deepseek") ? 65536 : undefined,
       maxOutputTokens: id.startsWith("deepseek") ? 8192 : undefined,
     }));
 }
 
-function normalizeAnthropicModels(models: AnthropicModel[]): DiscoveredModel[] {
+function normalizeAnthropicModels(
+  models: AnthropicModel[],
+  kind: ModelKind,
+): DiscoveredModel[] {
+  if (kind !== "text") return [];
+
   return models
     .filter((model) => model.id)
     .map((model) => ({
@@ -188,9 +310,13 @@ function normalizeAnthropicModels(models: AnthropicModel[]): DiscoveredModel[] {
     }));
 }
 
-function normalizeGoogleModels(models: GoogleModel[]): DiscoveredModel[] {
+function normalizeGoogleModels(
+  models: GoogleModel[],
+  kind: ModelKind,
+): DiscoveredModel[] {
   return models
     .filter((model) => model.name)
+    .filter((model) => modelMatchesKind(model.name!, undefined, kind))
     .map((model) => {
       const modelName = model.name!.replace(/^models\//, "");
       return {
@@ -210,6 +336,7 @@ function normalizeGoogleModels(models: GoogleModel[]): DiscoveredModel[] {
 function normalizeModels(
   providerType: ProviderType,
   data: unknown,
+  kind: ModelKind,
 ): DiscoveredModel[] {
   if (!data || typeof data !== "object") return [];
 
@@ -219,15 +346,19 @@ function normalizeModels(
   };
 
   if (providerType === "google" && Array.isArray(payload.models)) {
-    return normalizeGoogleModels(payload.models as GoogleModel[]);
+    return normalizeGoogleModels(payload.models as GoogleModel[], kind);
   }
 
   if (providerType === "anthropic" && Array.isArray(payload.data)) {
-    return normalizeAnthropicModels(payload.data as AnthropicModel[]);
+    return normalizeAnthropicModels(payload.data as AnthropicModel[], kind);
   }
 
   if (Array.isArray(payload.data)) {
-    return normalizeOpenAIModels(providerType, payload.data as OpenAIModel[]);
+    return normalizeOpenAIModels(
+      providerType,
+      payload.data as OpenAIModel[],
+      kind,
+    );
   }
 
   return [];
@@ -238,6 +369,7 @@ export async function POST(request: Request) {
 
   try {
     const body = (await request.json()) as TestProviderRequest;
+    const kind = body.kind || "text";
 
     if (!body.type || !body.baseUrl || !body.apiKey) {
       return NextResponse.json(
@@ -255,6 +387,7 @@ export async function POST(request: Request) {
       type: body.type,
       baseUrl: normalizeBaseUrl(body.baseUrl),
       apiKey: body.apiKey,
+      kind,
     });
 
     const response = await fetch(url, {
@@ -265,14 +398,12 @@ export async function POST(request: Request) {
     const text = await response.text();
 
     if (!response.ok) {
-      const fallbackModels =
-        body.type === "openai_compatible" && response.status === 404
-          ? getKnownCompatibleModels({
-              id: body.id,
-              name: body.name,
-              baseUrl: body.baseUrl,
-            })
-          : [];
+      const fallbackModels = getKnownCompatibleModels({
+        id: body.id,
+        name: body.name,
+        baseUrl: body.baseUrl,
+        kind,
+      });
 
       if (fallbackModels.length > 0) {
         return NextResponse.json({
@@ -293,13 +424,14 @@ export async function POST(request: Request) {
     }
 
     const data = text ? JSON.parse(text) : {};
-    const models = normalizeModels(body.type, data);
+    const models = normalizeModels(body.type, data, kind);
     const fallbackModels =
-      body.type === "openai_compatible" && models.length === 0
+      models.length === 0
         ? getKnownCompatibleModels({
             id: body.id,
             name: body.name,
             baseUrl: body.baseUrl,
+            kind,
           })
         : [];
 
@@ -311,7 +443,9 @@ export async function POST(request: Request) {
       warning:
         models.length === 0 && fallbackModels.length > 0
           ? "供应商返回的模型列表为空，已使用内置模型清单"
-          : undefined,
+          : models.length === 0
+            ? "接口可访问，但没有返回可选择的模型"
+            : undefined,
     });
   } catch (error) {
     return NextResponse.json({

@@ -9,12 +9,16 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Star,
   Trash2,
   XCircle,
 } from "lucide-react";
 import { Tooltip } from "@/components/ui/Tooltip";
 import {
+  getProviderSupportedKinds,
+  MODEL_KIND_LABELS,
   PROVIDER_TYPE_LABELS,
+  type ModelKind,
   type UserModel,
   type UserProvider,
 } from "@/types/provider";
@@ -22,6 +26,8 @@ import {
 interface ProviderCardProps {
   provider: UserProvider;
   models: UserModel[];
+  modelKind: ModelKind;
+  defaultModelRef?: string;
   isTesting: boolean;
   connectionResult: { type: "success" | "error"; message: string } | null;
   onEdit: () => void;
@@ -30,7 +36,8 @@ interface ProviderCardProps {
   onTest: () => void;
   onAddModel: () => void;
   onEditModel: (model: UserModel) => void;
-  onDeleteModel: (modelId: string) => void;
+  onDeleteModel: (model: UserModel) => void;
+  onSetDefaultModel: (model: UserModel) => void;
 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -42,9 +49,17 @@ const CAPABILITY_LABELS: Record<string, string> = {
   streaming: "流式",
 };
 
+const KIND_MODEL_LABELS: Record<ModelKind, string> = {
+  text: "文本模型",
+  video: "视频模型",
+  image: "图像模型",
+};
+
 export function ProviderCard({
   provider,
   models,
+  modelKind,
+  defaultModelRef,
   isTesting,
   connectionResult,
   onEdit,
@@ -54,9 +69,11 @@ export function ProviderCard({
   onAddModel,
   onEditModel,
   onDeleteModel,
+  onSetDefaultModel,
 }: ProviderCardProps) {
   const enabledModels = models.filter((model) => model.enabled);
   const isRunnable = provider.enabled && provider.apiKey.trim().length > 0;
+  const supportedKinds = getProviderSupportedKinds(provider);
 
   return (
     <article
@@ -73,21 +90,19 @@ export function ProviderCard({
             <h3 className="text-sm font-semibold text-white">
               {provider.name}
             </h3>
-            {provider.isBuiltIn && (
-              <span className="rounded-full border border-sky-200/10 bg-sky-300/10 px-2 py-0.5 text-[10px] font-medium text-sky-200">
-                内置
-              </span>
-            )}
           </div>
           <p className="mt-2 pl-11 text-xs text-white/42">
             {PROVIDER_TYPE_LABELS[provider.type]}
           </p>
+          <p className="mt-1 pl-11 text-[11px] text-white/30">
+            分类: {supportedKinds.map((kind) => MODEL_KIND_LABELS[kind]).join(" / ")}
+          </p>
         </div>
 
         <div className="flex items-center gap-1">
-          <Tooltip content="测试并同步模型" position="top">
+          <Tooltip content="获取模型列表" position="top">
             <button
-              aria-label="测试并同步模型"
+              aria-label="获取模型列表"
               onClick={onTest}
               disabled={isTesting}
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/55 transition hover:bg-white/15 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
@@ -108,9 +123,9 @@ export function ProviderCard({
               <Edit3 className="h-3.5 w-3.5" />
             </button>
           </Tooltip>
-          <Tooltip content={provider.isBuiltIn ? "停用" : "删除"} position="top">
+          <Tooltip content="删除" position="top">
             <button
-              aria-label={provider.isBuiltIn ? "停用供应商" : "删除供应商"}
+              aria-label="删除供应商"
               onClick={onDelete}
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/55 transition hover:bg-red-300/10 hover:text-red-200"
             >
@@ -183,7 +198,7 @@ export function ProviderCard({
               className="inline-flex items-center gap-1 text-xs font-medium text-emerald-200 transition-colors hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RefreshCw className="h-3 w-3" />
-              同步模型
+              获取模型
             </button>
             <button
               type="button"
@@ -191,13 +206,15 @@ export function ProviderCard({
               className="inline-flex items-center gap-1 text-xs font-medium text-sky-200 hover:text-sky-100"
             >
               <Plus className="h-3 w-3" />
-              手动添加
+              添加
             </button>
           </div>
         </div>
 
         {models.length === 0 ? (
-          <p className="text-xs italic text-white/38">还没有配置模型</p>
+          <p className="text-xs italic text-white/38">
+            还没有配置{KIND_MODEL_LABELS[modelKind]}
+          </p>
         ) : (
           <ul className="space-y-1.5">
             {models.map((model) => (
@@ -211,15 +228,34 @@ export function ProviderCard({
                   }`}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-white/88">
-                    {model.displayName || model.modelName}
-                  </p>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <p className="truncate text-white/88">
+                      {model.displayName || model.modelName}
+                    </p>
+                    {defaultModelRef === `${provider.id}:${model.modelName}` && (
+                      <span className="shrink-0 rounded bg-amber-300/10 px-1.5 py-0.5 text-[10px] text-amber-200">
+                        默认
+                      </span>
+                    )}
+                  </div>
                   <p className="truncate text-[10px] text-white/38">
-                    {model.capabilities
-                      .map((capability) => CAPABILITY_LABELS[capability] || capability)
-                      .join("、")}
+                    {modelKind === "text"
+                      ? model.capabilities
+                          .map((capability) => CAPABILITY_LABELS[capability] || capability)
+                          .join("、")
+                      : [model.endpoint, model.options ? "含模型参数" : ""]
+                          .filter(Boolean)
+                          .join(" / ")}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => onSetDefaultModel(model)}
+                  className="text-white/45 transition-colors hover:text-amber-200"
+                  aria-label="设为默认模型"
+                >
+                  <Star className="h-3.5 w-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={() => onEditModel(model)}
@@ -229,7 +265,7 @@ export function ProviderCard({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onDeleteModel(model.id)}
+                  onClick={() => onDeleteModel(model)}
                   className="text-white/45 transition-colors hover:text-red-200"
                 >
                   删除

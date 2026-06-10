@@ -8,21 +8,28 @@
 import { create } from "zustand";
 import type {
   ConnectionTestResult,
-  DiscoveredModel,
+  ModelKind,
   ProviderType,
+  UserDefaultModel,
   UserModel,
   UserProvider,
   UserRoutingRule,
 } from "@/types/provider";
-import { PROVIDER_DEFAULT_URLS } from "@/types/provider";
+import {
+  getProviderSupportedKinds,
+  PROVIDER_DEFAULT_URLS,
+} from "@/types/provider";
 import { generateId } from "@/lib/id";
 import {
   deleteModel as dbDeleteModel,
+  deleteDefaultModel as dbDeleteDefaultModel,
   deleteProvider as dbDeleteProvider,
   deleteRoutingRule as dbDeleteRoutingRule,
+  loadAllDefaultModels,
   loadAllProviders,
   loadAllRoutingRules,
   loadModelsForProvider,
+  saveDefaultModel,
   saveModel,
   saveProvider,
   saveRoutingRule,
@@ -37,12 +44,14 @@ interface ProviderState {
   providers: UserProvider[];
   models: Record<string, UserModel[]>;
   routingRules: UserRoutingRule[];
+  defaultModels: Record<ModelKind, string | undefined>;
   isLoaded: boolean;
   loadProviders: () => Promise<void>;
   addProvider: (params: {
     name: string;
     type: ProviderType;
     baseUrl?: string;
+    supportedKinds: ModelKind[];
     apiKey: string;
   }) => Promise<UserProvider>;
   updateProvider: (id: string, updates: Partial<UserProvider>) => Promise<void>;
@@ -50,6 +59,7 @@ interface ProviderState {
   setProviderEnabled: (id: string, enabled: boolean) => Promise<void>;
   addModel: (params: {
     providerId: string;
+    kind: ModelKind;
     modelName: string;
     displayName?: string;
     capabilities: string[];
@@ -57,25 +67,24 @@ interface ProviderState {
     maxOutputTokens?: number;
     costPer1kInput?: number;
     costPer1kOutput?: number;
+    endpoint?: string;
+    options?: string;
   }) => Promise<UserModel>;
   updateModel: (id: string, updates: Partial<UserModel>) => Promise<void>;
   removeModel: (id: string) => Promise<void>;
   setModelEnabled: (id: string, enabled: boolean) => Promise<void>;
+  setDefaultModel: (kind: ModelKind, modelRef: string | undefined) => Promise<void>;
+  getDefaultModelConfig: (kind: ModelKind) => {
+    provider: UserProvider;
+    model: UserModel;
+  } | null;
   saveRouting: (rule: UserRoutingRule) => Promise<void>;
   removeRouting: (taskType: string) => Promise<void>;
-  testConnection: (providerId: string) => Promise<ConnectionTestResult>;
+  testConnection: (
+    providerId: string,
+    kind?: ModelKind,
+  ) => Promise<ConnectionTestResult>;
   syncToModelGateway: () => void;
-}
-
-function isBuiltInProviderId(id: string): boolean {
-  return [
-    "openai",
-    "anthropic",
-    "google",
-    "deepseek",
-    "siliconflow",
-    "ollama",
-  ].includes(id);
 }
 
 function normalizeProviderBaseUrl(provider: Pick<UserProvider, "name" | "baseUrl">): string {
@@ -106,48 +115,28 @@ function findModelLocation(
   return null;
 }
 
-function toSyncedModels(
-  providerId: string,
-  currentModels: UserModel[],
-  discoveredModels: DiscoveredModel[],
-): UserModel[] {
-  const nowByName = new Map(
-    currentModels.map((model) => [model.modelName, model]),
-  );
-  const discoveredNames = new Set(
-    discoveredModels.map((model) => model.modelName),
-  );
-  const synced = discoveredModels.map((model) => {
-    const existing = nowByName.get(model.modelName);
+function getModelRef(providerId: string, modelName: string): string {
+  return `${providerId}:${modelName}`;
+}
 
-    return {
-      id: existing?.id || generateId("model"),
-      providerId,
-      modelName: model.modelName,
-      displayName: model.displayName || existing?.displayName || model.modelName,
-      capabilities:
-        model.capabilities.length > 0
-          ? model.capabilities
-          : existing?.capabilities || ["text", "json"],
-      contextWindow: model.contextWindow || existing?.contextWindow || 65536,
-      maxOutputTokens: model.maxOutputTokens || existing?.maxOutputTokens || 4096,
-      costPer1kInput: existing?.costPer1kInput,
-      costPer1kOutput: existing?.costPer1kOutput,
-      enabled: existing?.enabled ?? true,
-    };
-  });
-
-  const manualModels = currentModels.filter(
-    (model) => !discoveredNames.has(model.modelName),
+function toDefaultModelMap(defaults: UserDefaultModel[]): Record<ModelKind, string | undefined> {
+  return defaults.reduce(
+    (acc, entry) => {
+      acc[entry.kind] = entry.modelRef;
+      return acc;
+    },
+    { text: undefined, video: undefined, image: undefined } as Record<
+      ModelKind,
+      string | undefined
+    >,
   );
-
-  return [...synced, ...manualModels];
 }
 
 export const useProviderStore = create<ProviderState>()((set, get) => ({
   providers: [],
   models: {},
   routingRules: [],
+  defaultModels: { text: undefined, video: undefined, image: undefined },
   isLoaded: false,
 
   loadProviders: async () => {
@@ -159,19 +148,21 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     }
 
     const routingRules = await loadAllRoutingRules();
+    const defaultModels = await loadAllDefaultModels();
     const merged = mergeProviderSettings(persistedProviders, persistedModels);
 
     set({
       providers: merged.providers,
       models: merged.models,
       routingRules,
+      defaultModels: toDefaultModelMap(defaultModels),
       isLoaded: true,
     });
 
     get().syncToModelGateway();
   },
 
-  addProvider: async ({ name, type, baseUrl, apiKey }) => {
+  addProvider: async ({ name, type, baseUrl, supportedKinds, apiKey }) => {
     const now = new Date().toISOString();
     const provider: UserProvider = {
       id: generateId("prov"),
@@ -180,6 +171,12 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
       baseUrl: normalizeProviderBaseUrl({
         name,
         baseUrl: baseUrl || PROVIDER_DEFAULT_URLS[type],
+      }),
+      supportedKinds: getProviderSupportedKinds({
+        type,
+        name,
+        baseUrl: baseUrl || PROVIDER_DEFAULT_URLS[type],
+        supportedKinds,
       }),
       apiKey,
       enabled: true,
@@ -211,6 +208,10 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
               baseUrl: updates.baseUrl || provider.baseUrl,
             })
           : provider.baseUrl,
+      supportedKinds: getProviderSupportedKinds({
+        ...provider,
+        ...updates,
+      }),
       updatedAt: new Date().toISOString(),
     };
 
@@ -224,20 +225,22 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
   },
 
   removeProvider: async (id) => {
-    if (isBuiltInProviderId(id)) {
-      await get().setProviderEnabled(id, false);
-      return;
-    }
-
     await dbDeleteProvider(id);
 
     set((state) => {
       const { [id]: removed, ...rest } = state.models;
       void removed;
+      const defaultModels = { ...state.defaultModels };
+      for (const kind of Object.keys(defaultModels) as ModelKind[]) {
+        if (defaultModels[kind]?.startsWith(`${id}:`)) {
+          defaultModels[kind] = undefined;
+        }
+      }
 
       return {
         providers: state.providers.filter((provider) => provider.id !== id),
         models: rest,
+        defaultModels,
       };
     });
   },
@@ -264,6 +267,7 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
 
   addModel: async ({
     providerId,
+    kind,
     modelName,
     displayName,
     capabilities,
@@ -271,10 +275,13 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     maxOutputTokens,
     costPer1kInput,
     costPer1kOutput,
+    endpoint,
+    options,
   }) => {
     const model: UserModel = {
       id: generateId("model"),
       providerId,
+      kind,
       modelName,
       displayName,
       capabilities,
@@ -283,6 +290,8 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
       costPer1kInput,
       costPer1kOutput,
       enabled: true,
+      endpoint,
+      options,
     };
 
     await saveModel(model);
@@ -308,6 +317,13 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
 
     await saveModel(updated);
 
+    const oldRef = getModelRef(location.providerId, location.model.modelName);
+    const newRef = getModelRef(location.providerId, updated.modelName);
+    const defaultKind = (location.model.kind || "text") as ModelKind;
+    if (get().defaultModels[defaultKind] === oldRef && oldRef !== newRef) {
+      await saveDefaultModel({ kind: updated.kind || defaultKind, modelRef: newRef });
+    }
+
     set((state) => ({
       models: {
         ...state.models,
@@ -315,10 +331,31 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
           (entry) => (entry.id === id ? updated : entry),
         ),
       },
+      defaultModels:
+        state.defaultModels[defaultKind] === oldRef && oldRef !== newRef
+          ? {
+              ...state.defaultModels,
+              [defaultKind]: undefined,
+              [updated.kind || defaultKind]: newRef,
+            }
+          : state.defaultModels,
     }));
   },
 
   removeModel: async (id) => {
+    const location = findModelLocation(get().models, id);
+
+    if (location) {
+      const ref = getModelRef(location.providerId, location.model.modelName);
+      const defaultKinds = Object.entries(get().defaultModels)
+        .filter(([, modelRef]) => modelRef === ref)
+        .map(([kind]) => kind as ModelKind);
+
+      await Promise.all(
+        defaultKinds.map((kind) => dbDeleteDefaultModel(kind)),
+      );
+    }
+
     await dbDeleteModel(id);
 
     set((state) => {
@@ -330,7 +367,17 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
         );
       }
 
-      return { models: nextModels };
+      const nextDefaults = { ...state.defaultModels };
+      if (location) {
+        const ref = getModelRef(location.providerId, location.model.modelName);
+        for (const kind of Object.keys(nextDefaults) as ModelKind[]) {
+          if (nextDefaults[kind] === ref) {
+            nextDefaults[kind] = undefined;
+          }
+        }
+      }
+
+      return { models: nextModels, defaultModels: nextDefaults };
     });
   },
 
@@ -355,6 +402,41 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     }));
   },
 
+  setDefaultModel: async (kind, modelRef) => {
+    if (!modelRef) {
+      await dbDeleteDefaultModel(kind);
+      set((state) => ({
+        defaultModels: { ...state.defaultModels, [kind]: undefined },
+      }));
+      return;
+    }
+
+    await saveDefaultModel({ kind, modelRef });
+    set((state) => ({
+      defaultModels: { ...state.defaultModels, [kind]: modelRef },
+    }));
+  },
+
+  getDefaultModelConfig: (kind) => {
+    const state = get();
+    const modelRef = state.defaultModels[kind];
+    if (!modelRef) return null;
+
+    const [providerId, ...modelNameParts] = modelRef.split(":");
+    if (!providerId) return null;
+    const modelName = modelNameParts.join(":");
+    const provider = state.providers.find((entry) => entry.id === providerId);
+    const model = (state.models[providerId] || []).find(
+      (entry) => entry.modelName === modelName && entry.kind === kind,
+    );
+
+    if (!provider || !model || !provider.enabled || !model.enabled) {
+      return null;
+    }
+
+    return { provider, model };
+  },
+
   saveRouting: async (rule) => {
     await saveRoutingRule(rule);
     set((state) => ({
@@ -374,7 +456,7 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     }));
   },
 
-  testConnection: async (providerId) => {
+  testConnection: async (providerId, kind = "text") => {
     const provider = get().providers.find((entry) => entry.id === providerId);
     if (!provider) {
       return {
@@ -402,6 +484,7 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
           type: provider.type,
           baseUrl: normalizedBaseUrl,
           apiKey: provider.apiKey,
+          kind,
         }),
       });
 
@@ -416,31 +499,7 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
 
       const result = (await response.json()) as ConnectionTestResult;
 
-      if (!result.success || !result.models || result.models.length === 0) {
-        return result;
-      }
-
-      const syncedModels = toSyncedModels(
-        provider.id,
-        get().models[provider.id] || [],
-        result.models,
-      );
-
-      await Promise.all(syncedModels.map((model) => saveModel(model)));
-
-      set((state) => ({
-        models: {
-          ...state.models,
-          [provider.id]: syncedModels,
-        },
-      }));
-
-      get().syncToModelGateway();
-
-      return {
-        ...result,
-        modelsFound: syncedModels.length,
-      };
+      return result;
     } catch (error) {
       return {
         success: false,

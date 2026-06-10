@@ -4,7 +4,12 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import type { UserModel } from "@/types/provider";
+import {
+  MODEL_KIND_LABELS,
+  type ModelKind,
+  type ProviderType,
+  type UserModel,
+} from "@/types/provider";
 
 const AVAILABLE_CAPABILITIES = [
   { id: "text", label: "文本生成" },
@@ -19,6 +24,7 @@ interface ModelFormProps {
   open: boolean;
   onClose: () => void;
   onSave: (data: {
+    kind: ModelKind;
     modelName: string;
     displayName?: string;
     capabilities: string[];
@@ -26,8 +32,12 @@ interface ModelFormProps {
     maxOutputTokens: number;
     costPer1kInput?: number;
     costPer1kOutput?: number;
+    endpoint?: string;
+    options?: string;
   }) => void;
   existingModel?: UserModel;
+  modelKind: ModelKind;
+  providerType?: ProviderType;
 }
 
 export function ModelForm({
@@ -35,8 +45,11 @@ export function ModelForm({
   onClose,
   onSave,
   existingModel,
+  modelKind,
+  providerType,
 }: ModelFormProps) {
   const isEdit = !!existingModel;
+  const effectiveKind = existingModel?.kind || modelKind;
 
   const [modelName, setModelName] = useState(existingModel?.modelName || "");
   const [displayName, setDisplayName] = useState(
@@ -57,6 +70,8 @@ export function ModelForm({
   const [costPer1kOutput, setCostPer1kOutput] = useState(
     existingModel?.costPer1kOutput?.toString() || "",
   );
+  const [endpoint, setEndpoint] = useState(existingModel?.endpoint || "");
+  const [options, setOptions] = useState(existingModel?.options || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -69,8 +84,12 @@ export function ModelForm({
     setMaxOutputTokens(existingModel?.maxOutputTokens || 4096);
     setCostPer1kInput(existingModel?.costPer1kInput?.toString() || "");
     setCostPer1kOutput(existingModel?.costPer1kOutput?.toString() || "");
+    setEndpoint(
+      existingModel?.endpoint || getDefaultEndpoint(effectiveKind, providerType),
+    );
+    setOptions(existingModel?.options || "");
     setErrors({});
-  }, [existingModel, open]);
+  }, [effectiveKind, existingModel, open, providerType]);
 
   const toggleCapability = (capability: string) => {
     setCapabilities((current) =>
@@ -83,8 +102,18 @@ export function ModelForm({
   const validate = (): boolean => {
     const nextErrors: Record<string, string> = {};
     if (!modelName.trim()) nextErrors["modelName"] = "请输入模型 ID";
-    if (capabilities.length === 0) {
+    if (effectiveKind === "text" && capabilities.length === 0) {
       nextErrors["capabilities"] = "请至少选择一种模型能力";
+    }
+    if (effectiveKind !== "text" && !endpoint.trim()) {
+      nextErrors["endpoint"] = "请输入生成接口路径";
+    }
+    if (options.trim()) {
+      try {
+        JSON.parse(options);
+      } catch {
+        nextErrors["options"] = "必须是合法 JSON";
+      }
     }
 
     setErrors(nextErrors);
@@ -96,6 +125,7 @@ export function ModelForm({
     if (!validate()) return;
 
     onSave({
+      kind: effectiveKind,
       modelName: modelName.trim(),
       displayName: displayName.trim() || undefined,
       capabilities,
@@ -103,6 +133,8 @@ export function ModelForm({
       maxOutputTokens,
       costPer1kInput: costPer1kInput ? parseFloat(costPer1kInput) : undefined,
       costPer1kOutput: costPer1kOutput ? parseFloat(costPer1kOutput) : undefined,
+      endpoint: endpoint.trim() || undefined,
+      options: options.trim() || undefined,
     });
     onClose();
   };
@@ -111,7 +143,7 @@ export function ModelForm({
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? "编辑模型" : "添加模型"}
+      title={`${isEdit ? "编辑" : "添加"}${MODEL_KIND_LABELS[effectiveKind]}`}
       maxWidth="max-w-md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -138,51 +170,89 @@ export function ModelForm({
           hint="在界面中展示的名称，可选"
         />
 
-        <div>
-          <label className="mb-2 block text-sm font-medium text-text-primary">
-            模型能力
-          </label>
-          {errors["capabilities"] && (
-            <p className="mb-2 text-xs text-danger">{errors["capabilities"]}</p>
-          )}
-          <div className="flex flex-wrap gap-1.5">
-            {AVAILABLE_CAPABILITIES.map((capability) => (
-              <button
-                key={capability.id}
-                type="button"
-                onClick={() => toggleCapability(capability.id)}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  capabilities.includes(capability.id)
-                    ? "border-accent/50 bg-accent/20 text-accent"
-                    : "border-white/10 bg-black/[0.18] text-text-muted hover:border-border-light"
-                }`}
-              >
-                {capability.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {effectiveKind === "text" ? (
+          <>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-text-primary">
+                模型能力
+              </label>
+              {errors["capabilities"] && (
+                <p className="mb-2 text-xs text-danger">{errors["capabilities"]}</p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {AVAILABLE_CAPABILITIES.map((capability) => (
+                  <button
+                    key={capability.id}
+                    type="button"
+                    onClick={() => toggleCapability(capability.id)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                      capabilities.includes(capability.id)
+                        ? "border-accent/50 bg-accent/20 text-accent"
+                        : "border-white/10 bg-black/[0.18] text-text-muted hover:border-border-light"
+                    }`}
+                  >
+                    {capability.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="上下文长度"
-            type="number"
-            value={contextWindow.toString()}
-            onChange={(event) =>
-              setContextWindow(parseInt(event.target.value, 10) || 0)
-            }
-            hint="最大上下文 Token"
-          />
-          <Input
-            label="最大输出"
-            type="number"
-            value={maxOutputTokens.toString()}
-            onChange={(event) =>
-              setMaxOutputTokens(parseInt(event.target.value, 10) || 0)
-            }
-            hint="最大输出 Token"
-          />
-        </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="上下文长度"
+                type="number"
+                value={contextWindow.toString()}
+                onChange={(event) =>
+                  setContextWindow(parseInt(event.target.value, 10) || 0)
+                }
+                hint="最大上下文 Token"
+              />
+              <Input
+                label="最大输出"
+                type="number"
+                value={maxOutputTokens.toString()}
+                onChange={(event) =>
+                  setMaxOutputTokens(parseInt(event.target.value, 10) || 0)
+                }
+                hint="最大输出 Token"
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <Input
+              label="生成接口路径"
+              placeholder={effectiveKind === "image" ? "/images/generations" : "/videos/generations"}
+              value={endpoint}
+              onChange={(event) => {
+                setEndpoint(event.target.value);
+                if (errors["endpoint"]) {
+                  setErrors((state) => ({ ...state, endpoint: "" }));
+                }
+              }}
+              error={errors["endpoint"]}
+              hint="会和供应商 Base URL 拼接，例如 /images/generations"
+              required
+            />
+            <Input
+              label="Gateway 模型参数 JSON"
+              placeholder={
+                effectiveKind === "image"
+                  ? '{"size":"1024x1024","quality":"high"}'
+                  : '{"resolution":"720p","duration":5}'
+              }
+              value={options}
+              onChange={(event) => {
+                setOptions(event.target.value);
+                if (errors["options"]) {
+                  setErrors((state) => ({ ...state, options: "" }));
+                }
+              }}
+              error={errors["options"]}
+              hint="原样透传给 LiteLLM、OpenRouter 或兼容网关"
+            />
+          </>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Input
@@ -214,4 +284,13 @@ export function ModelForm({
       </form>
     </Modal>
   );
+}
+
+function getDefaultEndpoint(kind: ModelKind, providerType?: ProviderType): string {
+  if (providerType === "openrouter" && kind === "image") {
+    return "/chat/completions";
+  }
+  if (kind === "image") return "/images/generations";
+  if (kind === "video") return "/videos/generations";
+  return "";
 }

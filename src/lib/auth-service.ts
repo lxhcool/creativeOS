@@ -152,7 +152,7 @@ export async function requestEmailCode(params: {
   }
 
   const resend = new Resend(apiKey);
-  const from = process.env["RESEND_FROM_EMAIL"] || "CreativeOS <onboarding@resend.dev>";
+  const from = process.env["RESEND_FROM_EMAIL"] || "CreativeOS <noreply@lxhcoool.cn>";
   const subject =
     params.purpose === "register"
       ? "CreativeOS 注册验证码"
