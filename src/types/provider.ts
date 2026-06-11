@@ -23,7 +23,7 @@ export const MODEL_KIND_LABELS: Record<ModelKind, string> = {
 export const MODEL_KIND_DESCRIPTIONS: Record<ModelKind, string> = {
   text: "用于对话、规划、JSON 结构化输出和工具调用",
   video: "用于视频生成、视频编辑和动态素材生成",
-  image: "用于图片生成、角色资产和视觉素材生成",
+  image: "用于图片生成和视觉素材生成",
 };
 
 export type ProviderType =

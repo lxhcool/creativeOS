@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "dexie": "latest",
+    "konva": "^10.3.0",
     "lucide-react": "^1.17.0",
     "nanoid": "latest",
     "next": "latest",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-konva": "^19.2.5",
     "resend": "^6.12.4",
     "zod": "latest",
     "zustand": "latest"

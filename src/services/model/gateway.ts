@@ -8,9 +8,9 @@
  * ```ts
  * const gateway = getModelGateway();
  * const result = await gateway.generateJson({
- *   task: "create_character",
- *   schema: characterSchema,
- *   input: { name: "Archer" }
+ *   task: "structured_json",
+ *   schema: outputSchema,
+ *   prompt: "Generate structured output"
  * });
  * ```
  */
