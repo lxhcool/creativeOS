@@ -2,16 +2,6 @@
 
 import {
   Bot,
-  Download,
-  FileInput,
-  Image as ImageIcon,
-  Music,
-  Redo2,
-  Settings,
-  Trash2,
-  Type,
-  Undo2,
-  Video,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Konva from "konva";
@@ -28,13 +18,60 @@ import {
 } from "react-konva";
 import {
   createCanvasEdge,
-  createCircleElement,
   createImageElement,
   createMediaElement,
   createTextElement,
   isCanvasEdge,
   isCanvasElement,
 } from "@/entities/canvas/lib/factory";
+import {
+  executeCanvasBrainMediaGeneration,
+  executeCanvasBrainTextNode,
+  getCanvasEditorModelKind,
+  getCanvasBrainDoneMessage,
+  getCanvasBrainFailureMessage,
+  getCanvasBrainGeneratingMessage,
+  getCanvasBrainMediaNodeSize,
+  getCanvasBrainMissingModelMessage,
+  getCanvasBrainReadyElementPatch,
+  getCanvasBrainTextDoneMessage,
+  getCanvasReferenceImageUrls,
+  getCanvasModelEntries,
+  getCanvasModelKindForOutput,
+  hasConcreteAsset,
+  readBrowserImageSize,
+  readBrowserVideoSize,
+  resolveCanvasExecutionSources,
+  runCanvasBrainTurn,
+  toCanvasModelOptions,
+  type CanvasActionIntent,
+  type CanvasModelEntry,
+} from "@/features/canvas-brain";
+import {
+  appendResultNode,
+  appendResultNodeFromSources,
+  createResultPlaceholder,
+  createTextResultNode,
+} from "@/entities/canvas/lib/workflow";
+import { useProviderStore } from "@/stores/useProviderStore";
+import {
+  getCanvasNodeEditorFrame,
+  getCanvasNodeEditorTitle,
+} from "../lib/editor";
+import {
+  formatMediaTime,
+  useHtmlAudio,
+  useHtmlImage,
+  useHtmlVideo,
+} from "../lib/media";
+import { CanvasNodeEditorPanel } from "./CanvasNodeEditorPanel";
+import {
+  CanvasBrainPanel,
+  type CanvasBrainChatMessage,
+} from "./CanvasBrainPanel";
+import { CanvasApiConfigModal } from "./CanvasApiConfigModal";
+import { CanvasSideToolbar } from "./CanvasSideToolbar";
+import { CanvasTopToolbar } from "./CanvasTopToolbar";
 import type {
   CanvasEdge,
   CanvasElement,
@@ -46,6 +83,8 @@ import type {
   CanvasTextElement,
   CanvasViewport,
 } from "@/entities/canvas/model/types";
+import type { ModelKind } from "@/types/provider";
+import type { CanvasSelectOption } from "../model/types";
 
 const MIN_SCALE = 0.18;
 const MAX_SCALE = 4;
@@ -60,11 +99,7 @@ const PORT_RADIUS = 5.5;
 const SCALE_OPTIONS = [0.5, 0.75, 1, 1.2];
 const VIDEO_CONTROLS_HIDE_DELAY = 3000;
 
-type AiMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
+type AiMessage = CanvasBrainChatMessage;
 
 type CanvasSnapshot = {
   elements: CanvasElement[];
@@ -75,6 +110,14 @@ type DraftEdge = {
   sourceId: string;
   from: { x: number; y: number };
   to: { x: number; y: number };
+};
+
+type CanvasExecutionOptions = {
+  extraSourceIds?: string[];
+  extraSourceElements?: CanvasElement[];
+  intentOverride?: CanvasActionIntent;
+  baseElements?: CanvasElement[];
+  baseEdges?: CanvasEdge[];
 };
 
 type CanvasNodeCommonProps = {
@@ -167,42 +210,12 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function readImageSize(src: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const image = new window.Image();
-    image.onload = () => {
-      resolve({
-        width: image.naturalWidth || image.width,
-        height: image.naturalHeight || image.height,
-      });
-    };
-    image.onerror = () => reject(new Error("图片尺寸读取失败"));
-    image.src = src;
-  });
-}
+const readImageSize = readBrowserImageSize;
 
 function readVideoSize(src: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve) => {
-    const video = document.createElement("video");
-    const fallbackSize = {
-      width: DEFAULT_NODE_WIDTH,
-      height: DEFAULT_NODE_HEIGHT,
-    };
-    video.preload = "metadata";
-    video.onloadedmetadata = () => {
-      resolve({
-        width: video.videoWidth || DEFAULT_NODE_WIDTH,
-        height: video.videoHeight || DEFAULT_NODE_HEIGHT,
-      });
-      video.src = "";
-      video.load();
-    };
-    video.onerror = () => {
-      resolve(fallbackSize);
-      video.src = "";
-      video.load();
-    };
-    video.src = src;
+  return readBrowserVideoSize(src, {
+    width: DEFAULT_NODE_WIDTH,
+    height: DEFAULT_NODE_HEIGHT,
   });
 }
 
@@ -210,26 +223,13 @@ function getMediaNodeSize(intrinsicWidth: number, intrinsicHeight: number): {
   width: number;
   height: number;
 } {
-  const safeWidth = Math.max(1, intrinsicWidth);
-  const safeHeight = Math.max(1, intrinsicHeight);
-  const maxContentWidth = 720;
-  const maxContentHeight = 480;
-  const minContentWidth = 180;
-  const minContentHeight = 120;
-  const fitScale = Math.min(
-    maxContentWidth / safeWidth,
-    maxContentHeight / safeHeight,
-  );
-  const minScale = Math.max(
-    minContentWidth / safeWidth,
-    minContentHeight / safeHeight,
-  );
-  const scale = Math.max(Math.min(fitScale, 1), Math.min(minScale, fitScale));
-
-  return {
-    width: safeWidth * scale + NODE_PADDING * 2,
-    height: safeHeight * scale + NODE_PADDING * 2,
-  };
+  return getCanvasBrainMediaNodeSize({
+    intrinsicSize: {
+      width: intrinsicWidth,
+      height: intrinsicHeight,
+    },
+    padding: NODE_PADDING,
+  });
 }
 
 const getImageNodeSize = getMediaNodeSize;
@@ -263,217 +263,6 @@ function useViewportSize() {
   return size;
 }
 
-function useHtmlImage(src?: string) {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-
-  useEffect(() => {
-    if (!src) {
-      setImage(null);
-      return;
-    }
-
-    const nextImage = new window.Image();
-    nextImage.onload = () => setImage(nextImage);
-    nextImage.src = src;
-  }, [src]);
-
-  return image;
-}
-
-function useHtmlVideo(src?: string) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
-  const [coverReady, setCoverReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [muted, setMuted] = useState(true);
-
-  useEffect(() => {
-    if (!src) {
-      setVideo(null);
-      setCoverReady(false);
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      return;
-    }
-
-    const nextVideo = document.createElement("video");
-    videoRef.current = nextVideo;
-    nextVideo.src = src;
-    nextVideo.muted = true;
-    nextVideo.loop = true;
-    nextVideo.playsInline = true;
-    nextVideo.preload = "metadata";
-    const markCoverReady = () => {
-      setCoverReady(true);
-      setVideo(nextVideo);
-    };
-    nextVideo.onloadeddata = () => {
-      markCoverReady();
-    };
-    const syncTime = () => setCurrentTime(nextVideo.currentTime || 0);
-    const syncDuration = () =>
-      setDuration(Number.isFinite(nextVideo.duration) ? nextVideo.duration : 0);
-    const prepareCover = () => {
-      syncDuration();
-      try {
-        nextVideo.currentTime = Math.min(0.05, Math.max(0, nextVideo.duration || 0));
-      } catch {
-        markCoverReady();
-      }
-    };
-    nextVideo.addEventListener("timeupdate", syncTime);
-    nextVideo.addEventListener("loadedmetadata", syncDuration);
-    nextVideo.addEventListener("loadedmetadata", prepareCover);
-    nextVideo.addEventListener("durationchange", syncDuration);
-    nextVideo.addEventListener("seeked", markCoverReady);
-    nextVideo.onplay = () => setIsPlaying(true);
-    nextVideo.onpause = () => setIsPlaying(false);
-
-    return () => {
-      nextVideo.pause();
-      nextVideo.removeEventListener("timeupdate", syncTime);
-      nextVideo.removeEventListener("loadedmetadata", syncDuration);
-      nextVideo.removeEventListener("loadedmetadata", prepareCover);
-      nextVideo.removeEventListener("durationchange", syncDuration);
-      nextVideo.removeEventListener("seeked", markCoverReady);
-      nextVideo.src = "";
-      nextVideo.load();
-      videoRef.current = null;
-      setCoverReady(false);
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-    };
-  }, [src]);
-
-  const toggle = useCallback(() => {
-    const currentVideo = videoRef.current;
-    if (!currentVideo) return;
-
-    if (currentVideo.paused) {
-      void currentVideo.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-    } else {
-      currentVideo.pause();
-      setIsPlaying(false);
-    }
-  }, []);
-
-  const seekToRatio = useCallback(
-    (ratio: number) => {
-      const currentVideo = videoRef.current;
-      if (!currentVideo || duration <= 0) return;
-      currentVideo.currentTime = clamp(ratio, 0, 1) * duration;
-      setCurrentTime(currentVideo.currentTime);
-    },
-    [duration],
-  );
-
-  const toggleMute = useCallback(() => {
-    const currentVideo = videoRef.current;
-    if (!currentVideo) return;
-    currentVideo.muted = !currentVideo.muted;
-    setMuted(currentVideo.muted);
-  }, []);
-
-  return {
-    coverReady,
-    currentTime,
-    duration,
-    isPlaying,
-    muted,
-    progress: duration > 0 ? currentTime / duration : 0,
-    seekToRatio,
-    toggle,
-    toggleMute,
-    video,
-  };
-}
-
-function useHtmlAudio(src?: string) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [muted, setMuted] = useState(false);
-
-  useEffect(() => {
-    if (!src) {
-      audioRef.current?.pause();
-      audioRef.current = null;
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      setMuted(false);
-      return;
-    }
-
-    const audio = new Audio(src);
-    audio.preload = "metadata";
-    audioRef.current = audio;
-
-    const syncTime = () => setCurrentTime(audio.currentTime || 0);
-    const syncDuration = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-    const handleEnded = () => setIsPlaying(false);
-
-    audio.addEventListener("timeupdate", syncTime);
-    audio.addEventListener("loadedmetadata", syncDuration);
-    audio.addEventListener("durationchange", syncDuration);
-    audio.addEventListener("ended", handleEnded);
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener("timeupdate", syncTime);
-      audio.removeEventListener("loadedmetadata", syncDuration);
-      audio.removeEventListener("durationchange", syncDuration);
-      audio.removeEventListener("ended", handleEnded);
-      audioRef.current = null;
-    };
-  }, [src]);
-
-  const toggle = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (audio.paused) {
-      void audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-    } else {
-      audio.pause();
-      setIsPlaying(false);
-    }
-  }, []);
-
-  const seekToRatio = useCallback(
-    (ratio: number) => {
-      const audio = audioRef.current;
-      if (!audio || duration <= 0) return;
-      audio.currentTime = clamp(ratio, 0, 1) * duration;
-      setCurrentTime(audio.currentTime);
-    },
-    [duration],
-  );
-
-  const toggleMute = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.muted = !audio.muted;
-    setMuted(audio.muted);
-  }, []);
-
-  return {
-    currentTime,
-    duration,
-    isPlaying,
-    muted,
-    progress: duration > 0 ? currentTime / duration : 0,
-    seekToRatio,
-    toggle,
-    toggleMute,
-  };
-}
-
 function getOutputPortPosition(element: CanvasElement): { x: number; y: number } {
   return {
     x: element.x + element.width + PORT_OFFSET,
@@ -486,15 +275,6 @@ function getInputPortPosition(element: CanvasElement): { x: number; y: number } 
     x: element.x - PORT_OFFSET,
     y: element.y + element.height / 2,
   };
-}
-
-function formatMediaTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${minutes}:${remainingSeconds}`;
 }
 
 function isPointInsideElement(
@@ -534,6 +314,7 @@ export function FreeCanvas() {
   const size = useViewportSize();
   const stageRef = useRef<Konva.Stage>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const brainImageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -548,6 +329,7 @@ export function FreeCanvas() {
   const [past, setPast] = useState<CanvasSnapshot[]>([]);
   const [future, setFuture] = useState<CanvasSnapshot[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [draftEdge, setDraftEdge] = useState<DraftEdge | null>(null);
   const [draggingElementId, setDraggingElementId] = useState<string | null>(null);
@@ -567,13 +349,96 @@ export function FreeCanvas() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [brainModelRef, setBrainModelRef] = useState("");
+  const [brainAttachmentIds, setBrainAttachmentIds] = useState<string[]>([]);
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([
     {
       id: getMessageId(),
       role: "assistant",
-      content: "可以让我添加圆形、删除图片、整理画布，或把蓝色文本改成红色。",
+      content: "我是画布大脑。可以选择素材、协调上下文，并把你的意图转成画布操作。",
     },
   ]);
+  const providerModels = useProviderStore((state) => state.models);
+  const providers = useProviderStore((state) => state.providers);
+  const defaultModels = useProviderStore((state) => state.defaultModels);
+  const providersLoaded = useProviderStore((state) => state.isLoaded);
+  const loadProviders = useProviderStore((state) => state.loadProviders);
+  const selectedElement =
+    selectedId !== null
+      ? elements.find((element) => element.id === selectedId) || null
+      : null;
+  const selectedElementIsGenerating = selectedElement?.status === "generating";
+  const selectedEditorFrame = selectedElement
+    ? getCanvasNodeEditorFrame(selectedElement, viewport, size)
+    : null;
+  const selectedModelKind = selectedElement
+    ? getCanvasEditorModelKind(selectedElement)
+    : "text";
+  const modelOptions: CanvasSelectOption[] = toCanvasModelOptions(
+    getCanvasModelEntries({
+      providerModels,
+      providers,
+      kind: selectedModelKind,
+    }),
+  );
+  const preferredModelValue =
+    selectedElement?.modelRef || defaultModels[selectedModelKind] || "";
+  const selectedModelValue = modelOptions.some(
+    (option) => option.ref === preferredModelValue,
+  )
+    ? preferredModelValue
+    : modelOptions[0]?.ref || "";
+  const getModelEntriesForKind = useCallback(
+    (kind: ModelKind): CanvasModelEntry[] =>
+      getCanvasModelEntries({
+        providerModels,
+        providers,
+        kind,
+      }),
+    [providerModels, providers],
+  );
+  const getModelEntryForKind = useCallback(
+    (kind: ModelKind): CanvasModelEntry | undefined => {
+      const entries = getModelEntriesForKind(kind);
+      const preferred = defaultModels[kind];
+
+      return entries.find((entry) => entry.ref === preferred) || entries[0];
+    },
+    [defaultModels, getModelEntriesForKind],
+  );
+  const getModelEntryByRef = useCallback(
+    (modelRef: string | undefined, kind: ModelKind): CanvasModelEntry | undefined => {
+      const entries = getModelEntriesForKind(kind);
+      return entries.find((entry) => entry.ref === modelRef) || getModelEntryForKind(kind);
+    },
+    [getModelEntriesForKind, getModelEntryForKind],
+  );
+  const brainModelEntries = getModelEntriesForKind("text");
+  const resolvedBrainModelRef =
+    brainModelEntries.find((entry) => entry.ref === brainModelRef)?.ref ||
+    defaultModels.text ||
+    brainModelEntries[0]?.ref ||
+    "";
+  const hasBrainModel = brainModelEntries.some(
+    (entry) => entry.ref === resolvedBrainModelRef,
+  );
+  const getResolvedBrainModelEntry = useCallback(
+    (): CanvasModelEntry | undefined =>
+      brainModelEntries.find((entry) => entry.ref === resolvedBrainModelRef),
+    [brainModelEntries, resolvedBrainModelRef],
+  );
+  const brainModelOptions: CanvasSelectOption[] = toCanvasModelOptions(brainModelEntries);
+
+  const appendAiMessage = useCallback((role: AiMessage["role"], content: string) => {
+    setAiMessages((current) => [
+      ...current,
+      {
+        id: getMessageId(),
+        role,
+        content,
+      },
+    ]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -582,6 +447,12 @@ export function FreeCanvas() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!providersLoaded) {
+      void loadProviders();
+    }
+  }, [loadProviders, providersLoaded]);
 
   const setNodeHover = useCallback((id: string) => {
     if (hoverClearTimerRef.current) {
@@ -647,6 +518,17 @@ export function FreeCanvas() {
     [commitElements, elements],
   );
 
+  const patchElementDraft = useCallback(
+    (id: string, updates: Partial<CanvasElement>) => {
+      setElements((current) =>
+        current.map((element) =>
+          element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
+        ),
+      );
+    },
+    [],
+  );
+
   const previewUpdateElement = useCallback(
     (id: string, updates: Partial<CanvasElement>) => {
       setElements((current) =>
@@ -697,6 +579,7 @@ export function FreeCanvas() {
       setElements(previous.elements);
       setEdges(previous.edges);
       setSelectedId(null);
+      setSelectedEdgeId(null);
       setDraftEdge(null);
       return currentPast.slice(0, -1);
     });
@@ -713,10 +596,41 @@ export function FreeCanvas() {
       setElements(next.elements);
       setEdges(next.edges);
       setSelectedId(null);
+      setSelectedEdgeId(null);
       setDraftEdge(null);
       return currentFuture.slice(1);
     });
   }, [edges, elements]);
+
+  const deleteElement = useCallback(
+    (elementId: string) => {
+      const target = elements.find((element) => element.id === elementId);
+      if (target?.status === "generating") return;
+
+      commitCanvas({
+        elements: elements.filter((element) => element.id !== elementId),
+        edges: edges.filter(
+          (edge) => edge.sourceId !== elementId && edge.targetId !== elementId,
+        ),
+      });
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+      setDraftEdge(null);
+    },
+    [commitCanvas, edges, elements],
+  );
+
+  const deleteEdge = useCallback(
+    (edgeId: string) => {
+      commitCanvas({
+        elements,
+        edges: edges.filter((edge) => edge.id !== edgeId),
+      });
+      setSelectedEdgeId(null);
+      setDraftEdge(null);
+    },
+    [commitCanvas, edges, elements],
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -736,22 +650,27 @@ export function FreeCanvas() {
         redo();
       }
 
+      if ((event.key === "Backspace" || event.key === "Delete") && selectedEdgeId) {
+        event.preventDefault();
+        deleteEdge(selectedEdgeId);
+        return;
+      }
+
       if ((event.key === "Backspace" || event.key === "Delete") && selectedId) {
         event.preventDefault();
-        commitElements(elements.filter((element) => element.id !== selectedId));
-        setSelectedId(null);
-        setDraftEdge(null);
+        deleteElement(selectedId);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [commitElements, elements, redo, selectedId, undo]);
+  }, [deleteEdge, deleteElement, redo, selectedEdgeId, selectedId, undo]);
 
   const addElement = useCallback(
     (element: CanvasElement) => {
       commitElements([...elements, element]);
       setSelectedId(element.id);
+      setSelectedEdgeId(null);
     },
     [commitElements, elements],
   );
@@ -767,10 +686,6 @@ export function FreeCanvas() {
       width: size.width,
       height: size.height,
     });
-  }, [addElement, worldCenter]);
-
-  const addCircle = useCallback(() => {
-    addElement(createCircleElement(worldCenter()));
   }, [addElement, worldCenter]);
 
   const addImagePlaceholder = useCallback(() => {
@@ -803,6 +718,7 @@ export function FreeCanvas() {
         : from;
 
       setSelectedId(null);
+      setSelectedEdgeId(null);
       setDraftEdge({
         sourceId: element.id,
         from,
@@ -872,7 +788,10 @@ export function FreeCanvas() {
       const pointer = stageRef.current?.getPointerPosition();
       if (!pointer) return;
 
-      setSelectedId(null);
+      if (!selectedElementIsGenerating) {
+        setSelectedId(null);
+      }
+      setSelectedEdgeId(null);
       setDraftEdge(null);
       setPanStart({
         pointerX: pointer.x,
@@ -880,7 +799,7 @@ export function FreeCanvas() {
         viewport,
       });
     },
-    [viewport],
+    [selectedElementIsGenerating, viewport],
   );
 
   const handleStagePointerMove = useCallback(() => {
@@ -998,6 +917,37 @@ export function FreeCanvas() {
     [addElement, elements, updateElement, worldCenter],
   );
 
+  const handleBrainImageFile = useCallback(
+    async (file: File | undefined) => {
+      if (!file) return;
+      const src = await readFileAsDataUrl(file);
+      const imageSize = await readImageSize(src);
+      const nodeSize = getImageNodeSize(imageSize.width, imageSize.height);
+      const center = worldCenter();
+      const element = {
+        ...createImageElement({
+          position: {
+            x: center.x - 260,
+            y: center.y,
+          },
+          src,
+          label: file.name,
+        }),
+        x: center.x - 260 - nodeSize.width / 2,
+        y: center.y - nodeSize.height / 2,
+        width: nodeSize.width,
+        height: nodeSize.height,
+      };
+
+      addElement(element);
+      setBrainAttachmentIds((current) =>
+        Array.from(new Set([...current, element.id])),
+      );
+      appendAiMessage("assistant", `已把「${file.name}」添加为画布图片素材，下一次发送会优先参考它。`);
+    },
+    [addElement, appendAiMessage, worldCenter],
+  );
+
   const handleVideoFile = useCallback(
     async (file: File | undefined, targetId?: string | null) => {
       if (!file) return;
@@ -1112,6 +1062,7 @@ export function FreeCanvas() {
 
       commitCanvas({ elements: importedElements, edges: importedEdges });
       setSelectedId(null);
+      setSelectedEdgeId(null);
       setDraftEdge(null);
       if (data.viewport) {
         setViewport({
@@ -1133,6 +1084,7 @@ export function FreeCanvas() {
 
     commitCanvas({ elements: [], edges: [] });
     setSelectedId(null);
+    setSelectedEdgeId(null);
     setDraftEdge(null);
   }, [commitCanvas, elements.length]);
 
@@ -1162,130 +1114,537 @@ export function FreeCanvas() {
     link.click();
   }, []);
 
-  const arrangeElements = useCallback(() => {
-    if (elements.length === 0) return;
-    const center = worldCenter();
-    const columns = Math.max(1, Math.ceil(Math.sqrt(elements.length)));
-    const gapX = 340;
-    const gapY = 220;
-    const startX = center.x - ((columns - 1) * gapX) / 2;
-    const rows = Math.ceil(elements.length / columns);
-    const startY = center.y - ((rows - 1) * gapY) / 2;
+  const generateFromSelectedNode = useCallback(
+    async (
+      element: CanvasElement,
+      instructionOverride?: string,
+      options?: CanvasExecutionOptions,
+    ) => {
+      const prompt = (instructionOverride ?? element.prompt)?.trim();
 
-    commitElements(
-      elements.map((element, index) => ({
-        ...element,
-        x: startX + (index % columns) * gapX - element.width / 2,
-        y: startY + Math.floor(index / columns) * gapY - element.height / 2,
-        rotation: 0,
-      })),
-    );
-  }, [commitElements, elements, worldCenter]);
-
-  const appendAiMessage = useCallback((role: AiMessage["role"], content: string) => {
-    setAiMessages((current) => [
-      ...current,
-      {
-        id: getMessageId(),
-        role,
-        content,
-      },
-    ]);
-  }, []);
-
-  const runAiCommand = useCallback(
-    (command: string) => {
-      const normalized = command.toLowerCase();
-
-      if (
-        (normalized.includes("圆") || normalized.includes("circle")) &&
-        (normalized.includes("添加") || normalized.includes("生成") || normalized.includes("add"))
-      ) {
-        addCircle();
-        appendAiMessage("assistant", "已在画布中心添加一个圆形。");
+      if (!prompt) {
+        appendAiMessage("assistant", `请先在${getCanvasNodeEditorTitle(element)}节点下方输入生成描述。`);
         return;
       }
 
-      if (
-        (normalized.includes("删") || normalized.includes("delete")) &&
-        (normalized.includes("图片") || normalized.includes("image"))
-      ) {
-        commitElements(elements.filter((element) => element.kind !== "image"));
-        appendAiMessage("assistant", "已删除画布中的全部图片元素。");
+      if (element.kind === "text") {
+        const workingElements = options?.baseElements || elements;
+        const workingEdges = options?.baseEdges || edges;
+        const sourceElements = resolveCanvasExecutionSources({
+          targetId: element.id,
+          elements: workingElements,
+          edges: workingEdges,
+          extraSourceIds: options?.extraSourceIds,
+          extraSourceElements: options?.extraSourceElements,
+        });
+        const modelEntry = getModelEntryByRef(element.modelRef, "text");
+        const modelRef = modelEntry?.ref || "";
+
+        if (!modelRef || !modelEntry?.model || !modelEntry.provider) {
+          appendAiMessage("assistant", "请先配置可用的文本模型。");
+          return;
+        }
+
+        patchElementDraft(element.id, {
+          status: "generating",
+          error: undefined,
+          modelRef,
+        } as Partial<CanvasElement>);
+
+        try {
+          const execution = await executeCanvasBrainTextNode({
+            prompt,
+            element,
+            sourceElements,
+            provider: modelEntry.provider,
+            model: modelEntry.model,
+            intentOverride: options?.intentOverride,
+          });
+
+          if (execution.kind === "empty-material") {
+            patchElementDraft(element.id, {
+              status: "failed",
+              error: "当前节点没有可用于生成的素材内容。",
+            } as Partial<CanvasElement>);
+            appendAiMessage("assistant", execution.message);
+            return;
+          }
+
+          if (execution.kind === "media") {
+            const intent = execution.intent;
+
+            const outputModelEntry = getModelEntryForKind(
+              getCanvasModelKindForOutput(intent.outputKind),
+            );
+
+            if (!outputModelEntry?.provider) {
+              const message = getCanvasBrainMissingModelMessage(intent.outputKind);
+              patchElementDraft(element.id, {
+                status: "failed",
+                error: message,
+              } as Partial<CanvasElement>);
+              appendAiMessage("assistant", message);
+              return;
+            }
+
+            const resultNode = createResultPlaceholder({
+              source: element,
+              kind: intent.outputKind,
+              prompt: execution.visiblePrompt,
+              modelRef: outputModelEntry.ref,
+            });
+            const next = appendResultNodeFromSources({
+              elements: workingElements.map((entry) =>
+                entry.id === element.id
+                  ? ({ ...entry, ...getCanvasBrainReadyElementPatch(modelRef) } as CanvasElement)
+                  : entry,
+              ),
+              edges: workingEdges,
+              sources: [element, ...sourceElements],
+              result: resultNode,
+            });
+
+            commitCanvas(next);
+            setSelectedId(resultNode.id);
+
+            if (intent.outputKind === "image") {
+              try {
+                appendAiMessage(
+                  "assistant",
+                  getCanvasBrainGeneratingMessage({
+                    kind: "image",
+                    hasMaterialContext: true,
+                  }),
+                );
+                const patch = await executeCanvasBrainMediaGeneration({
+                  kind: "image",
+                  prompt: execution.generationPrompt,
+                  referenceImageUrls: getCanvasReferenceImageUrls([
+                    element,
+                    ...sourceElements,
+                  ]),
+                  provider: outputModelEntry.provider,
+                  model: outputModelEntry.model,
+                  promptProvider: getResolvedBrainModelEntry()?.provider,
+                  promptModel: getResolvedBrainModelEntry()?.model,
+                  element: resultNode,
+                  padding: NODE_PADDING,
+                  fallbackSize: {
+                    width: DEFAULT_NODE_WIDTH,
+                    height: DEFAULT_NODE_HEIGHT,
+                  },
+                });
+
+                patchElementDraft(resultNode.id, patch);
+                appendAiMessage(
+                  "assistant",
+                  getCanvasBrainDoneMessage({
+                    kind: "image",
+                    createdResult: true,
+                  }),
+                );
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : "图片生成失败";
+                const message = getCanvasBrainFailureMessage({
+                  kind: "image",
+                  detail,
+                });
+                patchElementDraft(resultNode.id, {
+                  status: "failed",
+                  error: message,
+                } as Partial<CanvasElement>);
+                appendAiMessage("assistant", message);
+              }
+              return;
+            }
+
+            if (intent.outputKind === "video") {
+              try {
+                appendAiMessage(
+                  "assistant",
+                  getCanvasBrainGeneratingMessage({
+                    kind: "video",
+                    hasMaterialContext: true,
+                  }),
+                );
+                const patch = await executeCanvasBrainMediaGeneration({
+                  kind: "video",
+                  prompt: execution.generationPrompt,
+                  provider: outputModelEntry.provider,
+                  model: outputModelEntry.model,
+                  element: resultNode,
+                  padding: NODE_PADDING,
+                  fallbackSize: {
+                    width: DEFAULT_NODE_WIDTH,
+                    height: DEFAULT_NODE_HEIGHT,
+                  },
+                });
+
+                patchElementDraft(resultNode.id, patch);
+                appendAiMessage(
+                  "assistant",
+                  getCanvasBrainDoneMessage({
+                    kind: "video",
+                    createdResult: true,
+                  }),
+                );
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : "视频生成失败";
+                const message = getCanvasBrainFailureMessage({
+                  kind: "video",
+                  detail,
+                });
+                patchElementDraft(resultNode.id, {
+                  status: "failed",
+                  error: message,
+                } as Partial<CanvasElement>);
+                appendAiMessage("assistant", message);
+              }
+              return;
+            }
+
+            appendAiMessage("assistant", "我已为这次创作准备好新的结果素材。");
+            return;
+          }
+
+          if (execution.shouldUpdateCurrent) {
+            commitElements(
+              workingElements.map((entry) =>
+                entry.id === element.id
+                  ? ({
+                      ...entry,
+                      text: execution.content,
+                      ...getCanvasBrainReadyElementPatch(modelRef),
+                    } as CanvasElement)
+                  : entry,
+              ),
+            );
+            appendAiMessage("assistant", getCanvasBrainTextDoneMessage(false));
+            return;
+          }
+
+          const resultNode = createTextResultNode({
+            source: element,
+            text: execution.content,
+            prompt: execution.intent.instruction || prompt,
+            modelRef,
+          });
+          const next = appendResultNodeFromSources({
+            elements: workingElements.map((entry) =>
+              entry.id === element.id
+                ? ({ ...entry, ...getCanvasBrainReadyElementPatch(modelRef) } as CanvasElement)
+                : entry,
+            ),
+            edges: workingEdges,
+            sources: [element, ...sourceElements],
+            result: resultNode,
+          });
+
+          commitCanvas(next);
+          setSelectedId(resultNode.id);
+          appendAiMessage("assistant", getCanvasBrainTextDoneMessage(true));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "文本生成失败";
+          patchElementDraft(element.id, {
+            status: "failed",
+            error: message,
+          } as Partial<CanvasElement>);
+          appendAiMessage("assistant", message);
+        }
         return;
       }
 
-      if (
-        normalized.includes("排列") ||
-        normalized.includes("整理") ||
-        normalized.includes("arrange")
-      ) {
-        arrangeElements();
-        appendAiMessage("assistant", "已按网格自动整理当前画布元素。");
+      const elementModelKind = getCanvasEditorModelKind(element);
+      const modelEntry = getModelEntryByRef(element.modelRef, elementModelKind);
+      const modelRef = modelEntry?.ref || "";
+
+      if (!modelRef || !modelEntry?.model || !modelEntry.provider) {
+        appendAiMessage("assistant", `请先为${getCanvasNodeEditorTitle(element)}节点配置或选择模型。`);
+        return;
+      }
+      const mediaSourceElements = resolveCanvasExecutionSources({
+        targetId: element.id,
+        elements,
+        edges,
+      });
+
+      if (element.kind === "image") {
+        const shouldCreateResult = hasConcreteAsset(element);
+        const resultNode = shouldCreateResult
+          ? createResultPlaceholder({
+              source: element,
+              kind: "image",
+              prompt,
+              modelRef,
+            })
+          : element;
+
+        if (shouldCreateResult) {
+          commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
+          setSelectedId(resultNode.id);
+        } else {
+          patchElementDraft(element.id, {
+            status: "generating",
+            error: undefined,
+            prompt,
+            modelRef,
+          } as Partial<CanvasElement>);
+        }
+
+        try {
+          appendAiMessage(
+            "assistant",
+            getCanvasBrainGeneratingMessage({
+              kind: "image",
+              hasMaterialContext: false,
+            }),
+          );
+          const patch = await executeCanvasBrainMediaGeneration({
+            kind: "image",
+            prompt,
+            referenceImageUrls: getCanvasReferenceImageUrls([
+              element,
+              ...mediaSourceElements,
+            ]),
+            provider: modelEntry.provider,
+            model: modelEntry.model,
+            promptProvider: getResolvedBrainModelEntry()?.provider,
+            promptModel: getResolvedBrainModelEntry()?.model,
+            element: resultNode,
+            padding: NODE_PADDING,
+            fallbackSize: {
+              width: DEFAULT_NODE_WIDTH,
+              height: DEFAULT_NODE_HEIGHT,
+            },
+          });
+
+          patchElementDraft(resultNode.id, patch);
+          appendAiMessage(
+            "assistant",
+            getCanvasBrainDoneMessage({
+              kind: "image",
+              createdResult: shouldCreateResult,
+            }),
+          );
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "图片生成失败";
+          const message = getCanvasBrainFailureMessage({
+            kind: "image",
+            detail,
+          });
+          patchElementDraft(resultNode.id, {
+            status: "failed",
+            error: message,
+          } as Partial<CanvasElement>);
+          appendAiMessage("assistant", message);
+        }
         return;
       }
 
-      if (
-        (normalized.includes("蓝") || normalized.includes("blue")) &&
-        (normalized.includes("红") || normalized.includes("red")) &&
-        (normalized.includes("文本") || normalized.includes("text"))
-      ) {
-        commitElements(
-          elements.map((element) =>
-            element.kind === "text" &&
-            ["#2563eb", "#1d4ed8", "blue"].includes(element.fill.toLowerCase())
-              ? { ...element, fill: "#ef4444" }
-              : element,
-          ),
-        );
-        appendAiMessage("assistant", "已把蓝色文本改成红色。");
+      if (element.kind === "video") {
+        const shouldCreateResult = hasConcreteAsset(element);
+        const resultNode = shouldCreateResult
+          ? createResultPlaceholder({
+              source: element,
+              kind: "video",
+              prompt,
+              modelRef,
+            })
+          : element;
+
+        if (shouldCreateResult) {
+          commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
+          setSelectedId(resultNode.id);
+        } else {
+          patchElementDraft(element.id, {
+            status: "generating",
+            error: undefined,
+            prompt,
+            modelRef,
+          } as Partial<CanvasElement>);
+        }
+
+        try {
+          appendAiMessage(
+            "assistant",
+            getCanvasBrainGeneratingMessage({
+              kind: "video",
+              hasMaterialContext: false,
+            }),
+          );
+          const patch = await executeCanvasBrainMediaGeneration({
+            kind: "video",
+            prompt,
+            provider: modelEntry.provider,
+            model: modelEntry.model,
+            element: resultNode,
+            padding: NODE_PADDING,
+            fallbackSize: {
+              width: DEFAULT_NODE_WIDTH,
+              height: DEFAULT_NODE_HEIGHT,
+            },
+          });
+
+          patchElementDraft(resultNode.id, patch);
+          appendAiMessage(
+            "assistant",
+            getCanvasBrainDoneMessage({
+              kind: "video",
+              createdResult: shouldCreateResult,
+            }),
+          );
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "视频生成失败";
+          const message = getCanvasBrainFailureMessage({
+            kind: "video",
+            detail,
+          });
+          patchElementDraft(resultNode.id, {
+            status: "failed",
+            error: message,
+          } as Partial<CanvasElement>);
+          appendAiMessage("assistant", message);
+        }
         return;
       }
 
-      if (
-        (normalized.includes("生成") || normalized.includes("create")) &&
-        (normalized.includes("图") || normalized.includes("image"))
-      ) {
-        addElement(
-          createImageElement({
-            position: worldCenter(),
-            label: apiEndpoint ? "AI 图像素材" : "AI 图像素材（未配置 API）",
-          }),
-        );
-        appendAiMessage(
-          "assistant",
-          apiEndpoint
-            ? "已创建 AI 图像素材。后续可接入配置的绘图 API。"
-            : "已创建 AI 图像素材；请在 API 配置里填写绘图接口后再接真实生成。",
-        );
-        return;
+      if (element.kind === "audio") {
+        const resultNode = createResultPlaceholder({
+          source: element,
+          kind: "audio",
+          prompt,
+          modelRef,
+        });
+        commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
+        setSelectedId(resultNode.id);
+        appendAiMessage("assistant", "我已经准备好一个新的音频素材位置。");
       }
-
-      appendAiMessage("assistant", "当前支持：添加圆形、删除图片、自动排列、蓝色文本改红色、生成图像素材。");
     },
     [
-      addCircle,
-      addElement,
-      apiEndpoint,
       appendAiMessage,
-      arrangeElements,
+      commitCanvas,
       commitElements,
+      edges,
       elements,
-      worldCenter,
+      getModelEntryForKind,
+      getModelEntryByRef,
+      getResolvedBrainModelEntry,
+      patchElementDraft,
     ],
   );
 
-  const submitAiCommand = useCallback(async () => {
+  const submitAiCommand = async () => {
     const command = chatInput.trim();
     if (!command || aiLoading) return;
 
     setChatInput("");
     appendAiMessage("user", command);
+    const plannedHistory: AiMessage[] = [
+      ...aiMessages,
+      {
+        id: getMessageId(),
+        role: "user",
+        content: command,
+      },
+    ];
+
     setAiLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 260));
-    runAiCommand(command);
-    setAiLoading(false);
-  }, [aiLoading, appendAiMessage, chatInput, runAiCommand]);
+    try {
+      let plannedInstruction = command;
+      let targetElement: CanvasElement | null = null;
+      let plannedIntent: CanvasActionIntent | undefined;
+      let plannedSourceIds: string[] = [];
+      let plannedSourceElements: CanvasElement[] = [];
+      let plannedElements = elements;
+      const activeBrainModelEntry = getModelEntryByRef(resolvedBrainModelRef, "text");
+      const focusIds = Array.from(
+        new Set([
+          ...(selectedElement ? [selectedElement.id] : []),
+          ...brainAttachmentIds.filter((id) =>
+            elements.some((element) => element.id === id),
+          ),
+        ]),
+      );
+
+      if (activeBrainModelEntry?.model && activeBrainModelEntry.provider) {
+        const brainResult = await runCanvasBrainTurn({
+          command,
+          history: plannedHistory,
+          elements,
+          edges,
+          focusIds,
+          selectedElement,
+          center: worldCenter(),
+          provider: activeBrainModelEntry.provider,
+          model: activeBrainModelEntry.model,
+        });
+
+        if (brainResult.kind === "chat" || brainResult.kind === "clarification") {
+          appendAiMessage("assistant", brainResult.message);
+          return;
+        }
+
+        const preparedAction = brainResult.action;
+
+        if (preparedAction.createdSourceElements.length > 0) {
+          commitCanvas({
+            elements: preparedAction.elements,
+            edges,
+          });
+        }
+
+        plannedElements = preparedAction.elements;
+        plannedSourceElements = preparedAction.sourceElements;
+        targetElement = preparedAction.targetElement;
+        plannedInstruction = preparedAction.instruction;
+        plannedIntent = preparedAction.intent;
+        plannedSourceIds = preparedAction.sourceIds;
+        appendAiMessage("assistant", brainResult.summary);
+        setBrainAttachmentIds([]);
+      }
+
+      if (!targetElement && !activeBrainModelEntry) {
+        appendAiMessage("assistant", "请先在右下角选择可用的文本模型作为画布大脑。");
+        return;
+      }
+
+      if (targetElement) {
+        setSelectedId(targetElement.id);
+        appendAiMessage(
+          "assistant",
+          selectedElement
+            ? "我会参考你选中的素材继续处理。"
+            : "我会参考画布里最相关的素材继续处理。",
+        );
+        await generateFromSelectedNode(targetElement, plannedInstruction, {
+          extraSourceIds: plannedSourceIds?.filter((id) => id !== targetElement.id),
+          extraSourceElements: plannedSourceElements.filter(
+            (source) => source.id !== targetElement.id,
+          ),
+          intentOverride: plannedIntent,
+          baseElements: plannedElements,
+          baseEdges: edges,
+        });
+        setBrainAttachmentIds([]);
+        return;
+      }
+
+      const center = worldCenter();
+      const element = {
+        ...createTextElement(center),
+        text: "",
+        prompt: command,
+      };
+      addElement(element);
+      appendAiMessage("assistant", "我先把你的想法整理成一个文本素材。");
+      await generateFromSelectedNode(element, plannedInstruction);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "画布大脑执行失败";
+      appendAiMessage("assistant", message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#02070b] text-white">
@@ -1320,7 +1679,17 @@ export function FreeCanvas() {
           />
 
           {edges.map((edge) => (
-            <CanvasEdgeNode key={edge.id} edge={edge} elements={elements} />
+            <CanvasEdgeNode
+              key={edge.id}
+              edge={edge}
+              elements={elements}
+              selected={edge.id === selectedEdgeId}
+              onSelect={() => {
+                setSelectedEdgeId(edge.id);
+                setSelectedId(null);
+              }}
+              onDelete={() => deleteEdge(edge.id)}
+            />
           ))}
 
           {draftEdge && <DraftEdgeNode edge={draftEdge} />}
@@ -1330,7 +1699,10 @@ export function FreeCanvas() {
               key={element.id}
               element={element}
               selected={element.id === selectedId || element.id === draftEdge?.sourceId}
-              onSelect={() => setSelectedId(element.id)}
+              onSelect={() => {
+                setSelectedId(element.id);
+                setSelectedEdgeId(null);
+              }}
               onHover={() => setNodeHover(element.id)}
               onLeave={() => clearNodeHover(element.id)}
               dragging={element.id === draggingElementId}
@@ -1364,74 +1736,48 @@ export function FreeCanvas() {
         </Layer>
       </Stage>
 
-      <aside
-        className="fixed z-20 box-border flex w-[68px] flex-col items-center gap-1.5 overflow-hidden border border-white/10 bg-black/[0.28] p-[6px] text-white shadow-2xl shadow-black/[0.28] backdrop-blur-xl"
-        style={{ left: 16, top: 48, borderRadius: 12 }}
-      >
-        <ToolButton icon={<Type className="h-4 w-4" />} label="文本" onClick={addText} />
-        <ToolButton
-          icon={<ImageIcon className="h-4 w-4" />}
-          label="图像"
-          onClick={addImagePlaceholder}
+      {selectedElement && selectedEditorFrame && (
+        <CanvasNodeEditorPanel
+          element={selectedElement}
+          frame={selectedEditorFrame}
+          modelOptions={modelOptions}
+          modelValue={selectedModelValue}
+          onTextChange={(text) =>
+            patchElementDraft(selectedElement.id, { text } as Partial<CanvasElement>)
+          }
+          onPromptChange={(prompt) =>
+            patchElementDraft(selectedElement.id, { prompt })
+          }
+          onModelChange={(modelRef) =>
+            patchElementDraft(selectedElement.id, { modelRef })
+          }
+          onGenerate={() => void generateFromSelectedNode(selectedElement)}
+          onDelete={() => deleteElement(selectedElement.id)}
         />
-        <ToolButton icon={<Video className="h-4 w-4" />} label="视频" onClick={addVideoPlaceholder} />
-        <ToolButton icon={<Music className="h-4 w-4" />} label="音乐" onClick={addAudioPlaceholder} />
-        <ToolButton
-          icon={<FileInput className="h-4 w-4" />}
-          label="导入"
-          onClick={() => importInputRef.current?.click()}
-        />
-        <ToolButton
-          icon={<Settings className="h-4 w-4" />}
-          label="API"
-          onClick={() => setApiConfigOpen(true)}
-        />
-      </aside>
+      )}
 
-      <div className={`fixed right-5 top-5 z-20 flex items-center gap-2 rounded-2xl p-2 ${darkPanel}`}>
-        <IconAction title="撤销" disabled={past.length === 0} onClick={undo}>
-          <Undo2 className="h-4 w-4" />
-        </IconAction>
-        <IconAction title="重做" disabled={future.length === 0} onClick={redo}>
-          <Redo2 className="h-4 w-4" />
-        </IconAction>
-        <IconAction title="清空画布" onClick={clearCanvas}>
-          <Trash2 className="h-4 w-4" />
-        </IconAction>
-        <IconAction title="导出 JSON" onClick={exportJson}>
-          <Download className="h-4 w-4" />
-        </IconAction>
-        <button
-          type="button"
-          onClick={exportPng}
-          className="h-9 rounded-full border border-white/10 bg-white/[0.06] px-3 text-xs font-medium text-white/70 transition hover:bg-white/[0.14] hover:text-white"
-        >
-          PNG
-        </button>
-        <label className="relative block">
-          <span className="sr-only">画布缩放</span>
-          <select
-            value={String(SCALE_OPTIONS.includes(viewport.scale) ? viewport.scale : "")}
-            onChange={(event) => setCanvasScale(Number(event.target.value))}
-            className="h-9 min-w-20 appearance-none rounded-full border border-white/10 bg-black/[0.18] px-4 pr-7 text-center text-xs font-medium text-white/60 outline-none transition hover:bg-white/[0.08] hover:text-white focus:border-white/25"
-            aria-label="选择画布缩放比例"
-          >
-            {!SCALE_OPTIONS.includes(viewport.scale) && (
-              <option value="" disabled>
-                {Math.round(viewport.scale * 100)}%
-              </option>
-            )}
-            {SCALE_OPTIONS.map((scale) => (
-              <option key={scale} value={scale}>
-                {Math.round(scale * 100)}%
-              </option>
-            ))}
-          </select>
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-white/35">
-            ▾
-          </span>
-        </label>
-      </div>
+      <CanvasSideToolbar
+        onAddText={addText}
+        onAddImage={addImagePlaceholder}
+        onAddVideo={addVideoPlaceholder}
+        onAddAudio={addAudioPlaceholder}
+        onImport={() => importInputRef.current?.click()}
+        onOpenApiConfig={() => setApiConfigOpen(true)}
+      />
+
+      <CanvasTopToolbar
+        panelClassName={darkPanel}
+        canUndo={past.length > 0}
+        canRedo={future.length > 0}
+        viewport={viewport}
+        scaleOptions={SCALE_OPTIONS}
+        onUndo={undo}
+        onRedo={redo}
+        onClear={clearCanvas}
+        onExportJson={exportJson}
+        onExportPng={exportPng}
+        onSetCanvasScale={setCanvasScale}
+      />
 
       <button
         type="button"
@@ -1443,113 +1789,44 @@ export function FreeCanvas() {
       </button>
 
       {chatOpen && (
-        <section className={`fixed bottom-24 right-5 z-30 flex h-[500px] w-[360px] max-w-[calc(100vw-40px)] flex-col rounded-[28px] ${darkPanel}`}>
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <div>
-              <h2 className="text-sm font-semibold text-white/90">AI 画布助手</h2>
-              <p className="text-xs text-white/40">自然语言控制当前画布</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setAiMessages([])}
-              className="rounded-full px-3 py-1 text-xs text-white/45 transition hover:bg-white/[0.1] hover:text-white/80"
-            >
-              清空
-            </button>
-          </div>
-
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-            {aiMessages.map((message) => (
-              <div
-                key={message.id}
-                className={`rounded-xl px-3 py-2 text-sm leading-6 ${
-                  message.role === "user"
-                    ? "ml-8 border border-sky-200/15 bg-sky-300/15 text-sky-50"
-                    : "mr-8 border border-white/10 bg-white/[0.08] text-white/72"
-                }`}
-              >
-                {message.content}
-              </div>
-            ))}
-            {aiLoading && (
-              <div className="mr-8 rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm text-white/45">
-                正在执行...
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-white/10 p-3">
-            <textarea
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void submitAiCommand();
-                }
-              }}
-              placeholder="例如：在画布中间添加一个圆形"
-              className="h-20 w-full resize-none rounded-2xl border border-white/10 bg-black/[0.22] px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-accent/70 focus:bg-black/[0.3]"
-            />
-            <button
-              type="button"
-              onClick={() => void submitAiCommand()}
-              disabled={aiLoading || !chatInput.trim()}
-              className="mt-2 h-10 w-full rounded-full border border-white/[0.14] bg-white/[0.13] text-sm font-medium text-white shadow-lg shadow-black/20 transition hover:bg-white/[0.18] disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              发送
-            </button>
-          </div>
-        </section>
+        <CanvasBrainPanel
+          panelClassName={darkPanel}
+          messages={aiMessages}
+          input={chatInput}
+          loading={aiLoading}
+          modelValue={resolvedBrainModelRef}
+          modelOptions={brainModelOptions}
+          attachmentCount={brainAttachmentIds.length}
+          canSend={!aiLoading && Boolean(chatInput.trim()) && hasBrainModel}
+          onInputChange={setChatInput}
+          onModelChange={setBrainModelRef}
+          onClearMessages={() => setAiMessages([])}
+          onUploadImage={() => brainImageInputRef.current?.click()}
+          onSubmit={() => void submitAiCommand()}
+        />
       )}
 
       {apiConfigOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
-          <section className={`w-full max-w-md rounded-[28px] p-5 ${darkPanel}`}>
-            <div className="mb-5 flex items-start justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-white/90">API 配置</h2>
-                <p className="mt-1 text-sm text-white/45">用于后续接入 AI 绘图、语音等服务。</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setApiConfigOpen(false)}
-                className="rounded-full px-3 py-1 text-white/45 transition hover:bg-white/[0.1] hover:text-white/80"
-              >
-                关闭
-              </button>
-            </div>
-
-            <label className="block">
-              <span className="mb-2 block text-xs font-medium text-white/55">接口地址</span>
-              <input
-                value={apiEndpoint}
-                onChange={(event) => setApiEndpoint(event.target.value)}
-                className="h-11 w-full rounded-2xl border border-white/10 bg-black/[0.22] px-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-accent/70"
-                placeholder="https://api.example.com/generate"
-              />
-            </label>
-            <label className="mt-4 block">
-              <span className="mb-2 block text-xs font-medium text-white/55">API Key</span>
-              <input
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                className="h-11 w-full rounded-2xl border border-white/10 bg-black/[0.22] px-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-accent/70"
-                placeholder="sk-..."
-                type="password"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => setApiConfigOpen(false)}
-              className="mt-5 h-11 w-full rounded-full border border-white/[0.14] bg-white/[0.13] text-sm font-medium text-white transition hover:bg-white/[0.18]"
-            >
-              保存配置
-            </button>
-          </section>
-        </div>
+        <CanvasApiConfigModal
+          panelClassName={darkPanel}
+          endpoint={apiEndpoint}
+          apiKey={apiKey}
+          onEndpointChange={setApiEndpoint}
+          onApiKeyChange={setApiKey}
+          onClose={() => setApiConfigOpen(false)}
+        />
       )}
 
+      <input
+        ref={brainImageInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+        className="hidden"
+        onChange={(event) => {
+          void handleBrainImageFile(event.target.files?.[0]);
+          event.target.value = "";
+        }}
+      />
       <input
         ref={imageInputRef}
         type="file"
@@ -1718,9 +1995,15 @@ function CanvasConnectionHandle({
 function CanvasEdgeNode({
   edge,
   elements,
+  selected,
+  onSelect,
+  onDelete,
 }: {
   edge: CanvasEdge;
   elements: CanvasElement[];
+  selected: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
 }) {
   const source = elements.find((element) => element.id === edge.sourceId);
   const target = elements.find((element) => element.id === edge.targetId);
@@ -1734,8 +2017,11 @@ function CanvasEdgeNode({
     <FlowingConnector
       from={sourcePort}
       to={targetPort}
-      opacity={0.72}
+      opacity={selected ? 0.96 : 0.72}
+      selected={selected}
       showEndpoints
+      onSelect={onSelect}
+      onDelete={onDelete}
     />
   );
 }
@@ -1746,6 +2032,7 @@ function DraftEdgeNode({ edge }: { edge: DraftEdge }) {
       from={edge.from}
       to={edge.to}
       opacity={0.9}
+      selected={false}
       showEndpoints
     />
   );
@@ -1755,14 +2042,32 @@ function FlowingConnector({
   from,
   to,
   opacity,
+  selected,
   showEndpoints,
+  onSelect,
+  onDelete,
 }: {
   from: { x: number; y: number };
   to: { x: number; y: number };
   opacity: number;
+  selected: boolean;
   showEndpoints: boolean;
+  onSelect?: () => void;
+  onDelete?: () => void;
 }) {
   const pathRef = useRef<Konva.Path>(null);
+  const midpoint = {
+    x: (from.x + to.x) / 2,
+    y: (from.y + to.y) / 2,
+  };
+  const handleSelect = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
+    event.cancelBubble = true;
+    onSelect?.();
+  };
+  const handleDelete = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
+    event.cancelBubble = true;
+    onDelete?.();
+  };
 
   useEffect(() => {
     const path = pathRef.current;
@@ -1780,19 +2085,60 @@ function FlowingConnector({
   }, []);
 
   return (
-    <Group listening={false}>
+    <Group listening={Boolean(onSelect)}>
+      {onSelect && (
+        <Path
+          data={getConnectorPathData(from, to)}
+          stroke="rgba(255,255,255,0.001)"
+          strokeWidth={16}
+          lineCap="round"
+          lineJoin="round"
+          onMouseDown={handleSelect}
+          onTouchStart={handleSelect}
+        />
+      )}
       <Path
         ref={pathRef}
         data={getConnectorPathData(from, to)}
-        stroke={`rgba(255,255,255,${opacity})`}
-        strokeWidth={1.6}
-        dash={[2, 6]}
+        stroke={selected ? "rgba(250,204,21,0.95)" : `rgba(255,255,255,${opacity})`}
+        strokeWidth={selected ? 2.4 : 1.6}
+        dash={selected ? [4, 6] : [2, 6]}
         lineCap="round"
         lineJoin="round"
-        shadowColor="rgba(255,255,255,0.22)"
-        shadowBlur={4}
+        shadowColor={selected ? "rgba(250,204,21,0.38)" : "rgba(255,255,255,0.22)"}
+        shadowBlur={selected ? 8 : 4}
         listening={false}
       />
+      {selected && onDelete && (
+        <Group
+          x={midpoint.x - 13}
+          y={midpoint.y - 13}
+          onMouseDown={handleDelete}
+          onTouchStart={handleDelete}
+        >
+          <Rect
+            width={26}
+            height={26}
+            fill="rgba(8,10,12,0.82)"
+            stroke="rgba(250,204,21,0.48)"
+            strokeWidth={1}
+            cornerRadius={8}
+            shadowColor="rgba(0,0,0,0.42)"
+            shadowBlur={12}
+          />
+          <Text
+            width={26}
+            height={26}
+            text="×"
+            align="center"
+            verticalAlign="middle"
+            fill="rgba(255,255,255,0.86)"
+            fontSize={17}
+            fontStyle="700"
+            listening={false}
+          />
+        </Group>
+      )}
       {showEndpoints && (
         <>
           <Circle
@@ -1866,16 +2212,18 @@ function CanvasTextNode({
       dragging={dragging}
     >
       <Text
-        x={NODE_PADDING}
-        y={NODE_PADDING}
-        width={Math.max(24, element.width - NODE_PADDING * 2)}
-        height={Math.max(24, element.height - NODE_PADDING * 2)}
+        x={NODE_PADDING + 8}
+        y={NODE_PADDING + 8}
+        width={Math.max(24, element.width - NODE_PADDING * 2 - 16)}
+        height={Math.max(24, element.height - NODE_PADDING * 2 - 16)}
         text={element.text}
         fill="#f8fafc"
-        fontSize={element.fontSize}
-        fontStyle="600"
-        align="center"
-        verticalAlign="middle"
+        fontSize={14}
+        lineHeight={1.35}
+        fontStyle="400"
+        align="left"
+        verticalAlign="top"
+        wrap="word"
       />
     </CanvasNodeShell>
   );
@@ -2053,13 +2401,21 @@ function CanvasMediaNode({
         x={NODE_PADDING}
         y={titleY}
         width={Math.max(24, element.width - NODE_PADDING * 2)}
-        text={element.label}
+        text={
+          element.status === "generating"
+            ? "生成中..."
+            : element.status === "failed"
+              ? element.error || "生成失败"
+              : element.label
+        }
         align="center"
-        fill="#f8fafc"
+        fill={element.status === "failed" ? "#fecaca" : "#f8fafc"}
         fontSize={18}
         fontStyle="600"
+        ellipsis
+        wrap="none"
       />
-      {!isAudio && !element.src && (
+      {!isAudio && !element.src && element.status !== "generating" && (
         <CanvasUploadButton
           x={element.width / 2 - 68}
           y={element.height / 2}
@@ -2395,18 +2751,28 @@ function CanvasImageNode({
         x={NODE_PADDING}
         y={titleY}
         width={Math.max(24, element.width - NODE_PADDING * 2)}
-        text={element.label || "图像素材"}
+        text={
+          element.status === "generating"
+            ? "生成中..."
+            : element.status === "failed"
+              ? element.error || "生成失败"
+              : element.label || "图像素材"
+        }
         align="center"
-        fill="#f8fafc"
+        fill={element.status === "failed" ? "#fecaca" : "#f8fafc"}
         fontSize={16}
         fontStyle="600"
+        ellipsis
+        wrap="none"
       />
-      <CanvasUploadButton
-        x={element.width / 2 - 68}
-        y={element.height / 2}
-        label="上传图片"
-        onClick={() => onUploadImage(element)}
-      />
+      {element.status !== "generating" && (
+        <CanvasUploadButton
+          x={element.width / 2 - 68}
+          y={element.height / 2}
+          label="上传图片"
+          onClick={() => onUploadImage(element)}
+        />
+      )}
     </CanvasNodeShell>
   );
 }
@@ -2551,54 +2917,5 @@ function CanvasNodeShell({
       />
       {children}
     </Group>
-  );
-}
-
-function ToolButton({
-  icon,
-  label,
-  active = false,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex h-[50px] w-[56px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg text-[11px] transition hover:bg-white/[0.12] hover:text-white ${
-        active ? "bg-sky-300/15 text-sky-100" : "text-white/72"
-      }`}
-    >
-      {icon}
-      <span className="max-w-full truncate">{label}</span>
-    </button>
-  );
-}
-
-function IconAction({
-  children,
-  title,
-  disabled,
-  onClick,
-}: {
-  children: React.ReactNode;
-  title: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/65 transition hover:bg-white/[0.14] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-    >
-      {children}
-    </button>
   );
 }

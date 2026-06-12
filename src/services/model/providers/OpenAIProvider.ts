@@ -13,10 +13,16 @@ import type {
   ChatChunk,
   JsonInput,
   JsonOutput,
+  ImageInput,
+  ImageOutput,
+  VideoInput,
+  VideoOutput,
   EmbedInput,
   EmbedOutput,
   ModelProviderConfig,
 } from "../types";
+import { generateOpenAICompatibleImage } from "../image-generation";
+import { generateOpenAICompatibleVideo } from "../video-generation";
 
 export class OpenAIProvider implements ModelProvider {
   readonly id: string;
@@ -266,6 +272,38 @@ export class OpenAIProvider implements ModelProvider {
       },
       modelId: json.model || modelId,
     };
+  }
+
+  async generateImage(
+    modelId: string,
+    input: ImageInput,
+    signal?: AbortSignal,
+  ): Promise<ImageOutput> {
+    return generateOpenAICompatibleImage({
+      providerId: this.id,
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      modelId,
+      model: this.models.find((model) => model.id === modelId),
+      input,
+      signal,
+    });
+  }
+
+  async generateVideo(
+    modelId: string,
+    input: VideoInput,
+    signal?: AbortSignal,
+  ): Promise<VideoOutput> {
+    return generateOpenAICompatibleVideo({
+      providerId: this.id,
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      modelId,
+      model: this.models.find((model) => model.id === modelId),
+      input,
+      signal,
+    });
   }
 
   private mapFinishReason(

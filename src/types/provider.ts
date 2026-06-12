@@ -8,7 +8,9 @@ export type ModelCapabilityUI =
   | "json"
   | "vision"
   | "embedding"
-  | "streaming";
+  | "streaming"
+  | "image"
+  | "video";
 
 export type ModelKind = "text" | "video" | "image";
 

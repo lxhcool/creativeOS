@@ -78,6 +78,37 @@ export interface JsonOutput<T = unknown> {
   providerId: string;
 }
 
+/** Image generation input */
+export interface ImageInput {
+  prompt: string;
+  referenceImageUrls?: string[];
+  options?: Record<string, unknown>;
+}
+
+/** Image generation output */
+export interface ImageOutput {
+  src: string;
+  mimeType: string;
+  modelId: string;
+  providerId: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Video generation input */
+export interface VideoInput {
+  prompt: string;
+  options?: Record<string, unknown>;
+}
+
+/** Video generation output */
+export interface VideoOutput {
+  src: string;
+  mimeType: string;
+  modelId: string;
+  providerId: string;
+  metadata?: Record<string, unknown>;
+}
+
 /** Embedding input */
 export interface EmbedInput {
   texts: string[];
@@ -131,6 +162,12 @@ export interface ModelProvider {
 
   /** Structured JSON generation (optional, falls back to chat + parse) */
   generateJson?<T>(modelId: string, input: JsonInput<T>, signal?: AbortSignal): Promise<JsonOutput<T>>;
+
+  /** Image generation (optional, implemented by image-capable providers) */
+  generateImage?(modelId: string, input: ImageInput, signal?: AbortSignal): Promise<ImageOutput>;
+
+  /** Video generation (optional, implemented by video-capable providers) */
+  generateVideo?(modelId: string, input: VideoInput, signal?: AbortSignal): Promise<VideoOutput>;
 
   /** Text embeddings (optional) */
   embed?(modelId: string, input: EmbedInput, signal?: AbortSignal): Promise<EmbedOutput>;

@@ -5,6 +5,8 @@ export type CanvasElementKind =
   | "video"
   | "audio";
 
+export type CanvasGenerationStatus = "idle" | "generating" | "done" | "failed";
+
 export interface CanvasElementBase {
   id: string;
   kind: CanvasElementKind;
@@ -13,6 +15,10 @@ export interface CanvasElementBase {
   width: number;
   height: number;
   rotation: number;
+  prompt?: string;
+  modelRef?: string;
+  status?: CanvasGenerationStatus;
+  error?: string;
 }
 
 export interface CanvasTextElement extends CanvasElementBase {

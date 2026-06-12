@@ -60,7 +60,7 @@ function toProviderConfig(
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey || undefined,
     models: models
-      .filter((model) => model.enabled && (model.kind || "text") === "text")
+      .filter((model) => model.enabled)
       .map((model) => ({
         id: model.modelName,
         capabilities: model.capabilities as ModelProviderConfig["models"][number]["capabilities"],
@@ -68,6 +68,8 @@ function toProviderConfig(
         maxOutputTokens: model.maxOutputTokens,
         costPer1kInput: model.costPer1kInput,
         costPer1kOutput: model.costPer1kOutput,
+        endpoint: model.endpoint,
+        options: model.options,
       })),
   };
 }

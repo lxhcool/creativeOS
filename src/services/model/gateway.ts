@@ -17,8 +17,10 @@
 
 import type {
   ChatInput,
+  ImageInput,
   JsonInput,
   TokenUsage,
+  VideoInput,
 } from "./types";
 import { ModelRegistry } from "./registry";
 import { ModelRouter } from "./router";
@@ -192,6 +194,127 @@ export class ModelGateway {
       providerId: result.providerId,
       usage: result.usage,
     };
+  }
+
+  /**
+   * Image generation through the configured image-capable provider.
+   */
+  async generateImage(params: {
+    task: string;
+    prompt: string;
+    options?: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<{ src: string; mimeType: string; modelId: string; providerId: string }> {
+    const modelChain = this.router.route(params.task);
+
+    if (modelChain.length === 0) {
+      throw new Error(`No models available for task: ${params.task}.`);
+    }
+
+    const imageInput: ImageInput = {
+      prompt: params.prompt,
+      referenceImageUrls: (params.options?.referenceImageUrls as string[] | undefined),
+      options: params.options,
+    };
+    const attemptedModels: string[] = [];
+    const failureReasons: string[] = [];
+
+    for (const ref of modelChain) {
+      attemptedModels.push(ref);
+      try {
+        const resolved = this.registry.resolveModel(ref);
+        if (!resolved) throw new Error(`Model not found: ${ref}`);
+        if (!resolved.provider.generateImage) {
+          throw new Error(
+            `Provider "${resolved.provider.id}" does not support generateImage`,
+          );
+        }
+
+        const result = await resolved.provider.generateImage(
+          resolved.entry.id,
+          imageInput,
+          params.signal,
+        );
+
+        return {
+          src: result.src,
+          mimeType: result.mimeType,
+          modelId: result.modelId,
+          providerId: result.providerId,
+        };
+      } catch (error) {
+        console.warn(
+          `[Gateway] Image generation "${ref}" failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        failureReasons.push(
+          `${ref}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    throw new Error(
+      `All image generation models failed. Attempted: ${attemptedModels.join(", ")}${
+        failureReasons.length > 0 ? `. Reasons: ${failureReasons.join(" | ")}` : ""
+      }`,
+    );
+  }
+
+  /**
+   * Video generation through the configured video-capable provider.
+   */
+  async generateVideo(params: {
+    task: string;
+    prompt: string;
+    options?: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<{ src: string; mimeType: string; modelId: string; providerId: string }> {
+    const modelChain = this.router.route(params.task);
+
+    if (modelChain.length === 0) {
+      throw new Error(`No models available for task: ${params.task}.`);
+    }
+
+    const videoInput: VideoInput = {
+      prompt: params.prompt,
+      options: params.options,
+    };
+    const attemptedModels: string[] = [];
+
+    for (const ref of modelChain) {
+      attemptedModels.push(ref);
+      try {
+        const resolved = this.registry.resolveModel(ref);
+        if (!resolved) throw new Error(`Model not found: ${ref}`);
+        if (!resolved.provider.generateVideo) {
+          throw new Error(
+            `Provider "${resolved.provider.id}" does not support generateVideo`,
+          );
+        }
+
+        const result = await resolved.provider.generateVideo(
+          resolved.entry.id,
+          videoInput,
+          params.signal,
+        );
+
+        return {
+          src: result.src,
+          mimeType: result.mimeType,
+          modelId: result.modelId,
+          providerId: result.providerId,
+        };
+      } catch (error) {
+        console.warn(
+          `[Gateway] Video generation "${ref}" failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    throw new Error(`All video generation models failed. Attempted: ${attemptedModels.join(", ")}`);
   }
 
   /**

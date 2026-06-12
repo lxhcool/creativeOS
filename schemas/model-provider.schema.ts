@@ -1,5 +1,5 @@
 /** Capability tags for model feature detection */
-export type ModelCapability = "text" | "tool_calling" | "json" | "vision" | "embedding" | "streaming";
+export type ModelCapability = "text" | "tool_calling" | "json" | "vision" | "embedding" | "streaming" | "image" | "video";
 
 /** A single model within a provider */
 export interface ModelEntry {
@@ -9,6 +9,8 @@ export interface ModelEntry {
   maxOutputTokens?: number;
   costPer1kInput?: number;
   costPer1kOutput?: number;
+  endpoint?: string;
+  options?: string;
 }
 
 /** A model provider configuration */

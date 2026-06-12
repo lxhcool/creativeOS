@@ -15,10 +15,16 @@ import type {
   ChatChunk,
   JsonInput,
   JsonOutput,
+  ImageInput,
+  ImageOutput,
+  VideoInput,
+  VideoOutput,
   EmbedInput,
   EmbedOutput,
   ModelProviderConfig,
 } from "../types";
+import { generateOpenAICompatibleImage } from "../image-generation";
+import { generateOpenAICompatibleVideo } from "../video-generation";
 
 export class OpenAICompatibleProvider implements ModelProvider {
   readonly id: string;
@@ -60,7 +66,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         model: modelId,
         messages: input.messages.map((m) => ({
           role: m.role,
-          content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+          content: m.content,
         })),
         temperature: input.temperature ?? 0.3,
         max_tokens: input.maxTokens ?? 4096,
@@ -254,6 +260,40 @@ export class OpenAICompatibleProvider implements ModelProvider {
       },
       modelId: json.model || modelId,
     };
+  }
+
+  async generateImage(
+    modelId: string,
+    input: ImageInput,
+    signal?: AbortSignal,
+  ): Promise<ImageOutput> {
+    return generateOpenAICompatibleImage({
+      providerId: this.id,
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      modelId,
+      model: this.models.find((model) => model.id === modelId),
+      input,
+      signal,
+      includeAuthHeader: this.apiKey !== "not-needed",
+    });
+  }
+
+  async generateVideo(
+    modelId: string,
+    input: VideoInput,
+    signal?: AbortSignal,
+  ): Promise<VideoOutput> {
+    return generateOpenAICompatibleVideo({
+      providerId: this.id,
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      modelId,
+      model: this.models.find((model) => model.id === modelId),
+      input,
+      signal,
+      includeAuthHeader: this.apiKey !== "not-needed",
+    });
   }
 
   private mapFinishReason(reason?: string): ChatOutput["finishReason"] {

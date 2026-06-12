@@ -25,9 +25,9 @@ export function createTextElement(position: Position): CanvasTextElement {
     width: DEFAULT_NODE_WIDTH,
     height: DEFAULT_NODE_HEIGHT,
     rotation: 0,
-    text: "文本节点",
+    text: "",
     fill: "#f8fafc",
-    fontSize: 28,
+    fontSize: 14,
   };
 }
 
