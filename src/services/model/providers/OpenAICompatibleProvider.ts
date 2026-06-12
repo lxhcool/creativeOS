@@ -169,6 +169,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
   ): Promise<JsonOutput<T>> {
     // Fallback: use chat + manual JSON parse + schema validation
     let attempts = 0;
+    let lastError = "";
     const systemPrompt = input.systemPrompt
       ? `${input.systemPrompt}\n\nYou MUST output ONLY valid JSON. No markdown, no explanation.`
       : "You MUST output ONLY valid JSON. No markdown fences, no explanation.";
@@ -206,6 +207,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           };
         }
 
+        lastError = `Schema validation failed: ${String(validationResult.error)}`;
         messages.push(
           { role: "assistant", content: text },
           {
@@ -213,7 +215,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
             content: `Validation error: ${String(validationResult.error)}. Output valid JSON matching the schema.`,
           },
         );
-      } catch {
+      } catch (error) {
+        lastError = `JSON parse failed: ${
+          error instanceof Error ? error.message : String(error)
+        }. Content preview: ${text.slice(0, 300)}`;
         messages.push({
           role: "user",
           content: "Not valid JSON. Output ONLY valid JSON starting with { or [.",
@@ -223,7 +228,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       attempts++;
     }
 
-    throw new Error(`${this.id} generateJson failed after 2 attempts`);
+    throw new Error(`generateJson failed after 2 attempts: ${lastError}`);
   }
 
   async embed(

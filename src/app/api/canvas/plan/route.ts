@@ -147,6 +147,64 @@ function buildPrompt(params: z.infer<typeof requestSchema>): string {
   ].join("\n\n");
 }
 
+function extractJsonObject(text: string): unknown {
+  const trimmed = text
+    .replace(/^```json?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    if (firstBrace < 0 || lastBrace <= firstBrace) throw new Error("规划模型没有返回 JSON。");
+    return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+}
+
+async function requestPlanWithChatFallback(params: {
+  gateway: ModelGateway;
+  prompt: string;
+  maxTokens: number;
+}) {
+  const result = await params.gateway.chat({
+    task: "canvas_plan",
+    messages: [
+      {
+        role: "system",
+        content:
+          "你是 CreativeOS 自由画布的大脑。必须只输出一个 JSON 对象，不要 Markdown，不要解释。",
+      },
+      {
+        role: "user",
+        content: `${params.prompt}\n\nJSON schema: { mode: 'chat'|'action', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }`,
+      },
+    ],
+    temperature: 0,
+    maxTokens: params.maxTokens,
+  });
+
+  return planSchema.parse(extractJsonObject(result.content));
+}
+
+function sanitizePlannerError(error: unknown): string {
+  if (!(error instanceof Error)) return "画布规划失败";
+
+  const message = error.message
+    .replace(/prov_[A-Za-z0-9]+:/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (/All JSON generation models failed/i.test(message)) {
+    const reason = message.match(/Reasons:\s*(.+)$/)?.[1];
+    if (reason) return reason.replace(/^.*?:\s*/, "");
+    return "画布大脑没有返回可用规划，请重试或切换文本模型。";
+  }
+
+  return message || "画布规划失败";
+}
+
 export async function POST(request: Request) {
   try {
     const body = requestSchema.parse(await request.json());
@@ -182,20 +240,37 @@ export async function POST(request: Request) {
     };
 
     const gateway = new ModelGateway(config);
-    const result = await gateway.generateJson({
-      task: "canvas_plan",
-      schema: planSchema,
-      schemaDescription:
-        "{ mode: 'chat'|'action', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }",
-      systemPrompt: "你是 CreativeOS 自由画布的大脑，只输出 JSON。",
-      prompt: buildPrompt(body),
-      temperature: 0,
-      maxTokens: 800,
-    });
+    const prompt = buildPrompt(body);
 
-    return NextResponse.json(result.data);
+    try {
+      const result = await gateway.generateJson({
+        task: "canvas_plan",
+        schema: planSchema,
+        schemaDescription:
+          "{ mode: 'chat'|'action', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }",
+        systemPrompt: "你是 CreativeOS 自由画布的大脑，只输出 JSON。",
+        prompt,
+        temperature: 0,
+        maxTokens: 800,
+      });
+
+      return NextResponse.json(result.data);
+    } catch (jsonError) {
+      console.warn(
+        `[CanvasPlan] Structured JSON planning failed, falling back to chat JSON parsing: ${
+          jsonError instanceof Error ? jsonError.message : String(jsonError)
+        }`,
+      );
+      const fallbackPlan = await requestPlanWithChatFallback({
+        gateway,
+        prompt,
+        maxTokens: 800,
+      });
+
+      return NextResponse.json(fallbackPlan);
+    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "画布规划失败";
+    const message = sanitizePlannerError(error);
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

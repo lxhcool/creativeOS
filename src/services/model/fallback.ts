@@ -87,6 +87,7 @@ export class FallbackHandler {
     signal?: AbortSignal,
   ): Promise<FallbackResult<JsonOutput<T>>> {
     const attemptedModels: string[] = [];
+    const failureReasons: string[] = [];
     const startTime = Date.now();
 
     for (const modelRef of modelChain) {
@@ -101,6 +102,9 @@ export class FallbackHandler {
           totalLatencyMs: Date.now() - startTime,
         };
       } catch (err) {
+        failureReasons.push(
+          `${modelRef}: ${err instanceof Error ? err.message : String(err)}`,
+        );
         console.warn(
           `[Fallback] JSON generation "${modelRef}" failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -108,7 +112,9 @@ export class FallbackHandler {
     }
 
     throw new Error(
-      `All JSON generation models failed. Attempted: ${attemptedModels.join(", ")}`,
+      `All JSON generation models failed. Attempted: ${attemptedModels.join(", ")}${
+        failureReasons.length > 0 ? `. Reasons: ${failureReasons.join(" | ")}` : ""
+      }`,
     );
   }
 

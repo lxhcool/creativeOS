@@ -36,16 +36,13 @@ import {
   getCanvasBrainReadyElementPatch,
   getCanvasBrainTextDoneMessage,
   getCanvasReferenceImageUrls,
-  getCanvasModelEntries,
   getCanvasModelKindForOutput,
   hasConcreteAsset,
   readBrowserImageSize,
   readBrowserVideoSize,
   resolveCanvasExecutionSources,
   runCanvasBrainTurn,
-  toCanvasModelOptions,
   type CanvasActionIntent,
-  type CanvasModelEntry,
 } from "@/features/canvas-brain";
 import {
   appendResultNode,
@@ -53,7 +50,6 @@ import {
   createResultPlaceholder,
   createTextResultNode,
 } from "@/entities/canvas/lib/workflow";
-import { useProviderStore } from "@/stores/useProviderStore";
 import {
   getCanvasNodeEditorFrame,
   getCanvasNodeEditorTitle,
@@ -64,6 +60,30 @@ import {
   useHtmlImage,
   useHtmlVideo,
 } from "../lib/media";
+import {
+  clamp,
+  getConnectorPathData,
+  getInputPortPosition,
+  getOutputPortPosition,
+  getTextNodeSize,
+  isPointInsideElement,
+  useViewportSize,
+} from "../lib/geometry";
+import { useCanvasDocument } from "../lib/useCanvasDocument";
+import { useCanvasModelSelection } from "../lib/useCanvasModelSelection";
+import {
+  darkPanel,
+  DEFAULT_NODE_HEIGHT,
+  DEFAULT_NODE_WIDTH,
+  DOT_GRID_SIZE,
+  MAX_SCALE,
+  MIN_SCALE,
+  NODE_PADDING,
+  NODE_RADIUS,
+  PORT_RADIUS,
+  SCALE_OPTIONS,
+  VIDEO_CONTROLS_HIDE_DELAY,
+} from "../model/constants";
 import { CanvasNodeEditorPanel } from "./CanvasNodeEditorPanel";
 import {
   CanvasBrainPanel,
@@ -83,34 +103,9 @@ import type {
   CanvasTextElement,
   CanvasViewport,
 } from "@/entities/canvas/model/types";
-import type { ModelKind } from "@/types/provider";
-import type { CanvasSelectOption } from "../model/types";
-
-const MIN_SCALE = 0.18;
-const MAX_SCALE = 4;
-const DOT_GRID_SIZE = 16;
-const HISTORY_LIMIT = 20;
-const NODE_PADDING = 8;
-const NODE_RADIUS = 8;
-const DEFAULT_NODE_WIDTH = 480;
-const DEFAULT_NODE_HEIGHT = 300;
-const PORT_OFFSET = 10;
-const PORT_RADIUS = 5.5;
-const SCALE_OPTIONS = [0.5, 0.75, 1, 1.2];
-const VIDEO_CONTROLS_HIDE_DELAY = 3000;
+import type { CanvasDraftEdge } from "../model/types";
 
 type AiMessage = CanvasBrainChatMessage;
-
-type CanvasSnapshot = {
-  elements: CanvasElement[];
-  edges: CanvasEdge[];
-};
-
-type DraftEdge = {
-  sourceId: string;
-  from: { x: number; y: number };
-  to: { x: number; y: number };
-};
 
 type CanvasExecutionOptions = {
   extraSourceIds?: string[];
@@ -147,43 +142,6 @@ type CanvasNodeRendererProps<TElement extends CanvasElement = CanvasElement> = {
   onUploadAudio: (element: CanvasMediaElement) => void;
 };
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function getTextNodeSize(text: string, fontSize: number): {
-  width: number;
-  height: number;
-} {
-  const lines = text.split(/\r?\n/);
-  const charWidth = fontSize * 0.72;
-  const maxContentWidth = 560;
-  const minWidth = DEFAULT_NODE_WIDTH;
-  const contentPadding = NODE_PADDING * 2;
-  const rawWidth =
-    Math.max(...lines.map((line) => Math.max(1, Array.from(line).length))) *
-    charWidth;
-  const width = clamp(rawWidth + contentPadding, minWidth, maxContentWidth);
-  const charsPerLine = Math.max(
-    1,
-    Math.floor((width - NODE_PADDING * 2) / charWidth),
-  );
-  const visualLineCount = lines.reduce(
-    (count, line) =>
-      count + Math.max(1, Math.ceil(Array.from(line).length / charsPerLine)),
-    0,
-  );
-
-  return {
-    width,
-    height: Math.max(
-      DEFAULT_NODE_HEIGHT,
-      fontSize * 1.45 + NODE_PADDING * 2,
-      visualLineCount * fontSize * 1.32 + NODE_PADDING * 2,
-    ),
-  };
-}
-
 function getMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -197,9 +155,6 @@ function downloadFile(filename: string, content: string, mime: string): void {
   link.click();
   URL.revokeObjectURL(url);
 }
-
-const darkPanel =
-  "border border-white/10 bg-white/[0.07] text-white shadow-2xl shadow-black/[0.32] backdrop-blur-xl";
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -244,72 +199,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-function useViewportSize() {
-  const [size, setSize] = useState({ width: 1280, height: 720 });
-
-  useEffect(() => {
-    const update = () => {
-      setSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-    };
-
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-
-  return size;
-}
-
-function getOutputPortPosition(element: CanvasElement): { x: number; y: number } {
-  return {
-    x: element.x + element.width + PORT_OFFSET,
-    y: element.y + element.height / 2,
-  };
-}
-
-function getInputPortPosition(element: CanvasElement): { x: number; y: number } {
-  return {
-    x: element.x - PORT_OFFSET,
-    y: element.y + element.height / 2,
-  };
-}
-
-function isPointInsideElement(
-  point: { x: number; y: number },
-  element: CanvasElement,
-): boolean {
-  return (
-    point.x >= element.x &&
-    point.x <= element.x + element.width &&
-    point.y >= element.y &&
-    point.y <= element.y + element.height
-  );
-}
-
-function getConnectorPathData(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): string {
-  const deltaX = to.x - from.x;
-  const deltaY = to.y - from.y;
-  const sameDirection = deltaX >= 0;
-  const bend = sameDirection
-    ? clamp(Math.abs(deltaX) * 0.45, 96, 260)
-    : clamp(Math.abs(deltaX) * 0.32 + Math.abs(deltaY) * 0.18, 120, 300);
-  const sourceControlX = from.x + bend;
-  const targetControlX = sameDirection ? to.x - bend : to.x - bend;
-
-  return [
-    `M ${from.x} ${from.y}`,
-    `C ${sourceControlX} ${from.y}`,
-    `${targetControlX} ${to.y}`,
-    `${to.x} ${to.y}`,
-  ].join(" ");
-}
-
 export function FreeCanvas() {
   const size = useViewportSize();
   const stageRef = useRef<Konva.Stage>(null);
@@ -321,18 +210,35 @@ export function FreeCanvas() {
   const pendingImageTargetRef = useRef<string | null>(null);
   const pendingVideoTargetRef = useRef<string | null>(null);
   const pendingAudioTargetRef = useRef<string | null>(null);
-  const dragSnapshotRef = useRef<CanvasElement[] | null>(null);
   const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [elements, setElements] = useState<CanvasElement[]>([]);
-  const [edges, setEdges] = useState<CanvasEdge[]>([]);
-  const [past, setPast] = useState<CanvasSnapshot[]>([]);
-  const [future, setFuture] = useState<CanvasSnapshot[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const {
+    addElement,
+    beginElementDrag,
+    clearCanvas,
+    commitCanvas,
+    commitElements,
+    deleteEdge,
+    deleteElement,
+    draftEdge,
+    draggingElementId,
+    edges,
+    elements,
+    finishElementDrag,
+    future,
+    patchElementDraft,
+    past,
+    previewUpdateElement,
+    redo,
+    selectedEdgeId,
+    selectedId,
+    setDraftEdge,
+    setSelectedEdgeId,
+    setSelectedId,
+    undo,
+    updateElement,
+  } = useCanvasDocument();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [draftEdge, setDraftEdge] = useState<DraftEdge | null>(null);
-  const [draggingElementId, setDraggingElementId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<CanvasViewport>({
     x: 0,
     y: 0,
@@ -358,11 +264,6 @@ export function FreeCanvas() {
       content: "我是画布大脑。可以选择素材、协调上下文，并把你的意图转成画布操作。",
     },
   ]);
-  const providerModels = useProviderStore((state) => state.models);
-  const providers = useProviderStore((state) => state.providers);
-  const defaultModels = useProviderStore((state) => state.defaultModels);
-  const providersLoaded = useProviderStore((state) => state.isLoaded);
-  const loadProviders = useProviderStore((state) => state.loadProviders);
   const selectedElement =
     selectedId !== null
       ? elements.find((element) => element.id === selectedId) || null
@@ -371,63 +272,19 @@ export function FreeCanvas() {
   const selectedEditorFrame = selectedElement
     ? getCanvasNodeEditorFrame(selectedElement, viewport, size)
     : null;
-  const selectedModelKind = selectedElement
-    ? getCanvasEditorModelKind(selectedElement)
-    : "text";
-  const modelOptions: CanvasSelectOption[] = toCanvasModelOptions(
-    getCanvasModelEntries({
-      providerModels,
-      providers,
-      kind: selectedModelKind,
-    }),
-  );
-  const preferredModelValue =
-    selectedElement?.modelRef || defaultModels[selectedModelKind] || "";
-  const selectedModelValue = modelOptions.some(
-    (option) => option.ref === preferredModelValue,
-  )
-    ? preferredModelValue
-    : modelOptions[0]?.ref || "";
-  const getModelEntriesForKind = useCallback(
-    (kind: ModelKind): CanvasModelEntry[] =>
-      getCanvasModelEntries({
-        providerModels,
-        providers,
-        kind,
-      }),
-    [providerModels, providers],
-  );
-  const getModelEntryForKind = useCallback(
-    (kind: ModelKind): CanvasModelEntry | undefined => {
-      const entries = getModelEntriesForKind(kind);
-      const preferred = defaultModels[kind];
-
-      return entries.find((entry) => entry.ref === preferred) || entries[0];
-    },
-    [defaultModels, getModelEntriesForKind],
-  );
-  const getModelEntryByRef = useCallback(
-    (modelRef: string | undefined, kind: ModelKind): CanvasModelEntry | undefined => {
-      const entries = getModelEntriesForKind(kind);
-      return entries.find((entry) => entry.ref === modelRef) || getModelEntryForKind(kind);
-    },
-    [getModelEntriesForKind, getModelEntryForKind],
-  );
-  const brainModelEntries = getModelEntriesForKind("text");
-  const resolvedBrainModelRef =
-    brainModelEntries.find((entry) => entry.ref === brainModelRef)?.ref ||
-    defaultModels.text ||
-    brainModelEntries[0]?.ref ||
-    "";
-  const hasBrainModel = brainModelEntries.some(
-    (entry) => entry.ref === resolvedBrainModelRef,
-  );
-  const getResolvedBrainModelEntry = useCallback(
-    (): CanvasModelEntry | undefined =>
-      brainModelEntries.find((entry) => entry.ref === resolvedBrainModelRef),
-    [brainModelEntries, resolvedBrainModelRef],
-  );
-  const brainModelOptions: CanvasSelectOption[] = toCanvasModelOptions(brainModelEntries);
+  const {
+    brainModelOptions,
+    getModelEntryByRef,
+    getModelEntryForKind,
+    getResolvedBrainModelEntry,
+    hasBrainModel,
+    modelOptions,
+    resolvedBrainModelRef,
+    selectedModelValue,
+  } = useCanvasModelSelection({
+    brainModelRef,
+    selectedElement,
+  });
 
   const appendAiMessage = useCallback((role: AiMessage["role"], content: string) => {
     setAiMessages((current) => [
@@ -447,12 +304,6 @@ export function FreeCanvas() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!providersLoaded) {
-      void loadProviders();
-    }
-  }, [loadProviders, providersLoaded]);
 
   const setNodeHover = useCallback((id: string) => {
     if (hoverClearTimerRef.current) {
@@ -479,158 +330,6 @@ export function FreeCanvas() {
       y: (size.height / 2 - viewport.y) / viewport.scale,
     };
   }, [size.height, size.width, viewport.scale, viewport.x, viewport.y]);
-
-  const commitCanvas = useCallback(
-    (next: { elements?: CanvasElement[]; edges?: CanvasEdge[] }) => {
-      setPast((current) => [
-        ...current.slice(-(HISTORY_LIMIT - 1)),
-        { elements, edges },
-      ]);
-      setElements(next.elements ?? elements);
-      setEdges(next.edges ?? edges);
-      setFuture([]);
-    },
-    [edges, elements],
-  );
-
-  const commitElements = useCallback(
-    (nextElements: CanvasElement[]) => {
-      const nextElementIds = new Set(nextElements.map((element) => element.id));
-      commitCanvas({
-        elements: nextElements,
-        edges: edges.filter(
-          (edge) =>
-            nextElementIds.has(edge.sourceId) && nextElementIds.has(edge.targetId),
-        ),
-      });
-    },
-    [commitCanvas, edges],
-  );
-
-  const updateElement = useCallback(
-    (id: string, updates: Partial<CanvasElement>) => {
-      commitElements(
-        elements.map((element) =>
-          element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
-        ),
-      );
-    },
-    [commitElements, elements],
-  );
-
-  const patchElementDraft = useCallback(
-    (id: string, updates: Partial<CanvasElement>) => {
-      setElements((current) =>
-        current.map((element) =>
-          element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
-        ),
-      );
-    },
-    [],
-  );
-
-  const previewUpdateElement = useCallback(
-    (id: string, updates: Partial<CanvasElement>) => {
-      setElements((current) =>
-        current.map((element) =>
-          element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
-        ),
-      );
-    },
-    [],
-  );
-
-  const beginElementDrag = useCallback((id: string) => {
-    dragSnapshotRef.current = elements;
-    setDraggingElementId(id);
-  }, [elements]);
-
-  const finishElementDrag = useCallback(
-    (id: string, updates: Partial<CanvasElement>) => {
-      const snapshot = dragSnapshotRef.current;
-      dragSnapshotRef.current = null;
-      setDraggingElementId(null);
-
-      if (!snapshot) {
-        updateElement(id, updates);
-        return;
-      }
-
-      const nextElements = snapshot.map((element) =>
-        element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
-      );
-
-      setPast((current) => [
-        ...current.slice(-(HISTORY_LIMIT - 1)),
-        { elements: snapshot, edges },
-      ]);
-      setElements(nextElements);
-      setFuture([]);
-    },
-    [edges, updateElement],
-  );
-
-  const undo = useCallback(() => {
-    setPast((currentPast) => {
-      const previous = currentPast[currentPast.length - 1];
-      if (!previous) return currentPast;
-
-      setFuture((currentFuture) => [{ elements, edges }, ...currentFuture]);
-      setElements(previous.elements);
-      setEdges(previous.edges);
-      setSelectedId(null);
-      setSelectedEdgeId(null);
-      setDraftEdge(null);
-      return currentPast.slice(0, -1);
-    });
-  }, [edges, elements]);
-
-  const redo = useCallback(() => {
-    setFuture((currentFuture) => {
-      const next = currentFuture[0];
-      if (!next) return currentFuture;
-
-      setPast((currentPast) =>
-        [...currentPast, { elements, edges }].slice(-HISTORY_LIMIT),
-      );
-      setElements(next.elements);
-      setEdges(next.edges);
-      setSelectedId(null);
-      setSelectedEdgeId(null);
-      setDraftEdge(null);
-      return currentFuture.slice(1);
-    });
-  }, [edges, elements]);
-
-  const deleteElement = useCallback(
-    (elementId: string) => {
-      const target = elements.find((element) => element.id === elementId);
-      if (target?.status === "generating") return;
-
-      commitCanvas({
-        elements: elements.filter((element) => element.id !== elementId),
-        edges: edges.filter(
-          (edge) => edge.sourceId !== elementId && edge.targetId !== elementId,
-        ),
-      });
-      setSelectedId(null);
-      setSelectedEdgeId(null);
-      setDraftEdge(null);
-    },
-    [commitCanvas, edges, elements],
-  );
-
-  const deleteEdge = useCallback(
-    (edgeId: string) => {
-      commitCanvas({
-        elements,
-        edges: edges.filter((edge) => edge.id !== edgeId),
-      });
-      setSelectedEdgeId(null);
-      setDraftEdge(null);
-    },
-    [commitCanvas, edges, elements],
-  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -665,15 +364,6 @@ export function FreeCanvas() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteEdge, deleteElement, redo, selectedEdgeId, selectedId, undo]);
-
-  const addElement = useCallback(
-    (element: CanvasElement) => {
-      commitElements([...elements, element]);
-      setSelectedId(element.id);
-      setSelectedEdgeId(null);
-    },
-    [commitElements, elements],
-  );
 
   const addText = useCallback(() => {
     const center = worldCenter();
@@ -725,7 +415,14 @@ export function FreeCanvas() {
         to,
       });
     },
-    [viewport.scale, viewport.x, viewport.y],
+    [
+      setDraftEdge,
+      setSelectedEdgeId,
+      setSelectedId,
+      viewport.scale,
+      viewport.x,
+      viewport.y,
+    ],
   );
 
   const handleWheel = useCallback(
@@ -799,7 +496,13 @@ export function FreeCanvas() {
         viewport,
       });
     },
-    [selectedElementIsGenerating, viewport],
+    [
+      selectedElementIsGenerating,
+      setDraftEdge,
+      setSelectedEdgeId,
+      setSelectedId,
+      viewport,
+    ],
   );
 
   const handleStagePointerMove = useCallback(() => {
@@ -824,7 +527,7 @@ export function FreeCanvas() {
       x: panStart.viewport.x + pointer.x - panStart.pointerX,
       y: panStart.viewport.y + pointer.y - panStart.pointerY,
     });
-  }, [draftEdge, panStart, viewport.scale, viewport.x, viewport.y]);
+  }, [draftEdge, panStart, setDraftEdge, viewport.scale, viewport.x, viewport.y]);
 
   const handleStagePointerUp = useCallback(() => {
     if (draftEdge) {
@@ -858,7 +561,7 @@ export function FreeCanvas() {
     }
 
     setPanStart(null);
-  }, [commitCanvas, draftEdge, edges, elements]);
+  }, [commitCanvas, draftEdge, edges, elements, setDraftEdge]);
 
   const requestImageUpload = useCallback((element: CanvasImageElement) => {
     pendingImageTargetRef.current = element.id;
@@ -1075,18 +778,16 @@ export function FreeCanvas() {
         });
       }
     },
-    [commitCanvas, handleAudioFile, handleImageFile, handleVideoFile],
+    [
+      commitCanvas,
+      handleAudioFile,
+      handleImageFile,
+      handleVideoFile,
+      setDraftEdge,
+      setSelectedEdgeId,
+      setSelectedId,
+    ],
   );
-
-  const clearCanvas = useCallback(() => {
-    if (elements.length === 0) return;
-    if (!window.confirm("确认清空画布上的所有元素？")) return;
-
-    commitCanvas({ elements: [], edges: [] });
-    setSelectedId(null);
-    setSelectedEdgeId(null);
-    setDraftEdge(null);
-  }, [commitCanvas, elements.length]);
 
   const exportJson = useCallback(() => {
     const payload: CanvasProjectExport = {
@@ -1530,6 +1231,7 @@ export function FreeCanvas() {
       getModelEntryByRef,
       getResolvedBrainModelEntry,
       patchElementDraft,
+      setSelectedId,
     ],
   );
 
@@ -2026,7 +1728,7 @@ function CanvasEdgeNode({
   );
 }
 
-function DraftEdgeNode({ edge }: { edge: DraftEdge }) {
+function DraftEdgeNode({ edge }: { edge: CanvasDraftEdge }) {
   return (
     <FlowingConnector
       from={edge.from}
