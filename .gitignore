@@ -42,3 +42,6 @@ next-env.d.ts
 
 # user-uploaded files
 /public/uploads/
+
+# local sprite processing engine
+/tools/sprite-video-lab/
