@@ -3,6 +3,8 @@
 /* eslint-disable @next/next/no-img-element, react-hooks/refs */
 
 import Link from "next/link";
+import { createPortal } from "react-dom";
+import { HexColorPicker } from "react-colorful";
 import {
   ArrowLeft,
   Download,
@@ -17,7 +19,7 @@ import {
   RotateCcw,
   Sparkles,
   Upload,
-  Wand2,
+  X,
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -53,6 +55,7 @@ import type {
 
 type Tone = "idle" | "success" | "warn" | "error";
 type WorkbenchMode = "sprite" | "line-cleaner";
+type PreviewPostprocessKind = "green-to-black" | "green-desaturate" | "semitransparent-to-black" | "semitransparent-to-opaque";
 
 type LineFrame = {
   file: File;
@@ -108,6 +111,38 @@ const MATTE_MODES = [
   ["birefnet_luma_corridorkey", "BiRefNet + Luma 合并后 / CorridorKey 精修（慢速）"],
   ["none", "不抠图，只缩放对齐"],
 ] as const;
+
+const MATTE_MODE_HELP: Record<ProcessingOptions["matteMode"], string> = {
+  chroma: "按背景色抠图；自动模式会从当前抽帧边角估计绿幕/纯色背景，并清理连通背景、深绿阴影和小块绿边。",
+  birefnet_chroma: "先用 BiRefNet 识别主体，再结合背景色去除幕布；适合主体颜色接近背景但速度较慢。",
+  birefnet: "只用 BiRefNet 主体分割，不依赖背景色；适合非纯色背景，首次加载和处理较慢。",
+  corridorkey: "只用 CorridorKey 做绿幕/蓝幕抠图；边缘更细，但模型启动较慢。",
+  luma: "按亮度生成透明度；适合黑白遮罩、发光或高反差素材。",
+  birefnet_corridorkey: "BiRefNet 给出主体范围，CorridorKey 细化边缘；质量优先，速度较慢。",
+  birefnet_corridorkey_key: "BiRefNet 后再用 CorridorKey 收紧背景，适合背景残留明显的素材。",
+  birefnet_luma: "BiRefNet 保主体，Luma 补亮部或特效边缘。",
+  birefnet_luma_key: "BiRefNet 后再用 Luma 收紧透明区域。",
+  birefnet_luma_corridorkey: "BiRefNet、Luma、CorridorKey 组合，适合复杂边缘但速度最慢。",
+  none: "不做抠图，只按当前尺寸和画布规则输出。",
+};
+
+const PREVIEW_POSTPROCESS: Record<PreviewPostprocessKind, { label: string; route: string; manifestKey: string }> = {
+  "green-to-black": { label: "绿边转黑", route: "/preview-green-to-black", manifestKey: "green_to_black" },
+  "green-desaturate": { label: "去饱和", route: "/preview-green-desaturate", manifestKey: "green_desaturate" },
+  "semitransparent-to-black": { label: "半透转黑", route: "/preview-semitransparent-to-black", manifestKey: "semitransparent_to_black" },
+  "semitransparent-to-opaque": { label: "半透不透明", route: "/preview-semitransparent-to-opaque", manifestKey: "semitransparent_to_opaque" },
+};
+
+const PREVIEW_POSTPROCESS_KINDS = Object.keys(PREVIEW_POSTPROCESS) as PreviewPostprocessKind[];
+
+function previewPostprocessStats(preview: SpritePreview | null | undefined, kind: PreviewPostprocessKind) {
+  return preview?.postprocess?.[PREVIEW_POSTPROCESS[kind].manifestKey];
+}
+
+function previewPostprocessChanged(preview: SpritePreview | null | undefined, kind: PreviewPostprocessKind) {
+  const changed = previewPostprocessStats(preview, kind)?.changed_pixels;
+  return typeof changed === "number" ? changed : null;
+}
 
 const MAGIC_VARIANTS: Array<{ key: MagicVariant["key"]; label: string }> = [
   { key: "half", label: "MAGIC 1/2" },
@@ -193,6 +228,64 @@ function Button({
   );
 }
 
+function SurfaceActionButton({
+  children,
+  onClick,
+  disabled,
+  active = false,
+  accent = false,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-3xl border px-3 text-xs font-medium shadow-lg shadow-black/20 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 ${
+        accent
+          ? "border-orange-200/25 bg-[linear-gradient(135deg,rgba(251,146,60,0.34),rgba(12,12,14,0.82))] text-orange-50 hover:border-orange-200/40"
+          : active
+            ? "border-white/18 bg-white/[0.12] text-white hover:bg-white/[0.16]"
+            : "border-white/10 bg-white/[0.07] text-white/78 hover:bg-white/[0.1] hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ToolPill({
+  children,
+  onClick,
+  disabled,
+  active = false,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex h-8 shrink-0 cursor-pointer items-center justify-center rounded-3xl border px-2.5 text-xs font-medium shadow-lg shadow-black/20 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 ${
+        active
+          ? "border-white/18 bg-white/[0.12] text-white hover:bg-white/[0.16]"
+          : "border-white/10 bg-white/[0.07] text-white/72 hover:bg-white/[0.1] hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 function Field({
   label,
   children,
@@ -211,6 +304,72 @@ function Field({
   );
 }
 
+function ColorField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!buttonRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const handleClick = () => {
+    if (disabled) return;
+    const nextOpen = !open;
+    if (nextOpen) {
+      setRect(buttonRef.current?.getBoundingClientRect() || null);
+    }
+    setOpen(nextOpen);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        disabled={disabled}
+        onClick={handleClick}
+        className={`flex h-9 w-full items-center gap-2 rounded-2xl border border-white/10 px-3 text-xs outline-none transition ${disabled ? "cursor-not-allowed bg-white/[0.04] text-white/35 opacity-40" : "bg-white/[0.07] text-white hover:bg-white/[0.1] focus:border-white/25 focus:ring-2 focus:ring-white/10"}`}
+      >
+        <span className="h-5 w-5 rounded-md border border-white/10" style={{ backgroundColor: value }} />
+        <span className="text-white/70">{value.toUpperCase()}</span>
+      </button>
+      {open && rect &&
+        createPortal(
+          <div
+            className="fixed z-[9999] mt-2 rounded-xl border border-white/10 bg-zinc-900/95 p-2 shadow-xl backdrop-blur-xl"
+            style={{ left: rect.left, top: rect.bottom + 8 }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <HexColorPicker color={value} onChange={onChange} />
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/35">{children}</h3>
+  );
+}
+
 function Panel({
   title,
   kicker,
@@ -218,7 +377,7 @@ function Panel({
   children,
   className = "",
 }: {
-  title: string;
+  title?: string;
   kicker?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
@@ -226,14 +385,16 @@ function Panel({
 }) {
   return (
     <section className={`rounded-lg border border-white/10 bg-white/[0.055] shadow-2xl shadow-black/20 backdrop-blur-2xl ${className}`}>
-      <div className="flex min-h-14 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-        <div>
-          {kicker && <p className="text-[10px] uppercase tracking-[0.2em] text-sky-200/45">{kicker}</p>}
-          <h2 className="text-sm font-semibold text-white/88">{title}</h2>
+      {title && (
+        <div className="flex min-h-12 items-center justify-between gap-3 px-4 py-2">
+          <div>
+            {kicker && <p className="text-[10px] uppercase tracking-[0.2em] text-sky-200/45">{kicker}</p>}
+            <h2 className="text-sm font-semibold text-white/88">{title}</h2>
+          </div>
+          {action}
         </div>
-        {action}
-      </div>
-      <div className="p-4">{children}</div>
+      )}
+      <div className="p-2.5">{children}</div>
     </section>
   );
 }
@@ -242,17 +403,30 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`h-9 w-full rounded-2xl border border-white/10 bg-white/[0.07] px-3 text-xs text-white outline-none transition placeholder:text-white/25 focus:border-white/25 focus:bg-white/[0.1] focus:ring-2 focus:ring-white/10 ${props.className || ""}`}
+      className={`h-9 w-full rounded-2xl border border-white/10 bg-white/[0.07] px-3 text-xs text-white outline-none transition placeholder:text-white/25 focus:border-white/25 focus:bg-white/[0.1] focus:ring-2 focus:ring-white/10 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-white/35 disabled:opacity-40 ${props.className || ""}`}
     />
   );
 }
 
 function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select
-      {...props}
-      className={`h-9 w-full rounded-2xl border border-white/10 bg-[#11181d] px-3 text-xs text-white outline-none transition focus:border-white/25 focus:ring-2 focus:ring-white/10 ${props.className || ""}`}
-    />
+    <div className="relative">
+      <select
+        {...props}
+        className={`h-9 w-full appearance-none rounded-2xl border border-white/10 bg-white/[0.07] px-3 pr-9 text-xs text-white outline-none transition hover:bg-white/[0.1] focus:border-white/25 focus:bg-white/[0.1] focus:ring-2 focus:ring-white/10 disabled:cursor-not-allowed disabled:bg-white/[0.04] disabled:text-white/35 disabled:opacity-40 ${props.className || ""}`}
+      />
+      <svg
+        className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/40"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M4 6l4 4 4-4" />
+      </svg>
+    </div>
   );
 }
 
@@ -266,12 +440,19 @@ function Check({
   label: string;
 }) {
   return (
-    <label className="flex min-h-8 cursor-pointer items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.045] px-3 text-xs text-white/70">
+    <label className="flex min-h-8 cursor-pointer items-center gap-2.5 rounded-xl border border-white/8 bg-white/[0.035] px-3 text-xs text-white/70 transition hover:bg-white/[0.07]">
+      <span className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-[6px] border transition ${checked ? "border-white/40 bg-white" : "border-white/25 bg-white/[0.04]"}`}>
+        {checked && (
+          <svg viewBox="0 0 16 16" className="h-3 w-3 text-zinc-900" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3.5 8.5l3 3 6-6.5" />
+          </svg>
+        )}
+      </span>
       <input
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="h-3.5 w-3.5 accent-sky-300"
+        className="sr-only"
       />
       <span>{label}</span>
     </label>
@@ -283,7 +464,6 @@ export default function SpriteVideoLab() {
   const [status, setStatus] = useState("等待导入素材。");
   const [tone, setTone] = useState<Tone>("idle");
   const [busy, setBusy] = useState("");
-  const [path, setPath] = useState("");
   const [upload, setUpload] = useState<SpriteUpload | null>(null);
   const [options, setOptions] = useState<ProcessingOptions>(DEFAULT_OPTIONS);
   const [startFrame, setStartFrame] = useState(1);
@@ -322,10 +502,25 @@ export default function SpriteVideoLab() {
   const uploadFrameCount = frameCountForUpload(upload);
   const currentMediaType = mediaType(upload);
   const mediaUrl = spriteAssetUrl(upload?.media_url || upload?.video_url);
+  const activePreview = preview && upload && preview.upload_id === upload.upload_id ? preview : null;
   const selectedForPreview = useMemo(
     () => selectedFrames(job, selected, orderedSelection, selectionOrder, reverse),
     [job, orderedSelection, reverse, selected, selectionOrder],
   );
+
+  const selectState = useMemo(() => {
+    const total = job?.frame_count || 0;
+    const sel = selected.size;
+    const allSelected = total > 0 && sel === total;
+    const noneSelected = sel === 0;
+    const oddOnly = sel > 0 && total > 0 && [...selected].every((i) => (i + 1) % 2 === 1);
+    const evenOnly = sel > 0 && total > 0 && [...selected].every((i) => (i + 1) % 2 === 0);
+    if (allSelected) return "all" as const;
+    if (noneSelected) return "none" as const;
+    if (oddOnly) return "odd" as const;
+    if (evenOnly) return "even" as const;
+    return "partial" as const;
+  }, [selected, job?.frame_count]);
 
   const setMessage = useCallback((message: string, nextTone: Tone = "idle") => {
     setStatus(message);
@@ -360,22 +555,6 @@ export default function SpriteVideoLab() {
     setCurrentPreviewIndex(0);
   }
 
-  async function importPath() {
-    if (!path.trim()) {
-      setMessage("先填写本地视频、GIF、图片或序列帧路径。", "warn");
-      return;
-    }
-    await runBusy("import-path", async () => {
-      setMessage("正在导入本地路径...");
-      const data = await spriteApi<{ ok: true; upload: SpriteUpload }>("/import-path", {
-        method: "POST",
-        body: { path: path.trim() },
-      });
-      applyUpload(data.upload);
-      setMessage(`已导入 ${data.upload.display_name}。`, "success");
-    });
-  }
-
   async function uploadFiles(files: File[]) {
     if (!files.length) return;
     const sorted = sortFiles(files);
@@ -388,6 +567,7 @@ export default function SpriteVideoLab() {
       return;
     }
     await runBusy("upload", async () => {
+      setPreview(null);
       const form = new FormData();
       sorted.forEach((file) => form.append("video", file, file.webkitRelativePath || file.name));
       setMessage(sorted.length > 1 ? `正在载入 ${sorted.length} 张序列帧...` : `正在载入 ${sorted[0]!.name}...`);
@@ -506,24 +686,26 @@ export default function SpriteVideoLab() {
     });
   }
 
-  async function postprocessPreview(kind: "green-to-black" | "green-desaturate" | "semitransparent-to-black" | "semitransparent-to-opaque") {
-    if (!preview?.preview_id) {
+  async function postprocessPreview(kind: PreviewPostprocessKind) {
+    if (!activePreview?.preview_id) {
       setMessage("先生成单帧预览，再做后处理。", "warn");
       return;
     }
-    const routeMap = {
-      "green-to-black": "/preview-green-to-black",
-      "green-desaturate": "/preview-green-desaturate",
-      "semitransparent-to-black": "/preview-semitransparent-to-black",
-      "semitransparent-to-opaque": "/preview-semitransparent-to-opaque",
-    };
     await runBusy(kind, async () => {
-      const data = await spriteApi<{ ok: true; preview: SpritePreview }>(routeMap[kind], {
+      const data = await spriteApi<{ ok: true; preview: SpritePreview }>(PREVIEW_POSTPROCESS[kind].route, {
         method: "POST",
-        body: { preview_id: preview.preview_id, threshold: 42, dominance: 24, alpha_min: 1, alpha_max: 254 },
+        body: { preview_id: activePreview.preview_id, threshold: 42, dominance: 24, alpha_min: 1, alpha_max: 254 },
       });
       setPreview(data.preview);
-      setMessage("预览后处理已完成。", "success");
+      const changed = previewPostprocessChanged(data.preview, kind);
+      setMessage(
+        changed === null
+          ? `${PREVIEW_POSTPROCESS[kind].label}已应用到当前预览。`
+          : changed > 0
+            ? `${PREVIEW_POSTPROCESS[kind].label}已应用，影响 ${changed.toLocaleString()} 个像素。`
+            : `${PREVIEW_POSTPROCESS[kind].label}没有命中像素，当前预览不会变化。`,
+        changed === 0 ? "warn" : "success",
+      );
     });
   }
 
@@ -824,39 +1006,30 @@ export default function SpriteVideoLab() {
     <main className="h-screen overflow-hidden bg-[#02070b] text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(56,189,248,0.16),transparent_30%),radial-gradient(circle_at_80%_15%,rgba(255,255,255,0.08),transparent_24%),linear-gradient(180deg,#02070b,#071016_45%,#030609)]" />
       <div className="relative z-10 flex h-screen flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-black/20 px-5 backdrop-blur-2xl">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.07] text-white/70 transition hover:bg-white/[0.13] hover:text-white">
+        <header className="flex h-18 shrink-0 items-center justify-between px-5">
+          <div className="flex min-w-0 items-center gap-4">
+            <Link href="/" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.07] text-white/70 transition hover:bg-white/[0.13] hover:text-white">
               <ArrowLeft className="h-4 w-4" />
             </Link>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.24em] text-sky-200/45">CreativeOS Tool</p>
-              <h1 className="text-base font-semibold tracking-wide text-white/90">Sprite 资产处理台</h1>
+            <h1 className="text-base font-semibold tracking-wide text-white/90 shrink-0">Sprite 资产处理台</h1>
+            <div className="flex min-w-0 items-center gap-2 text-xs">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${tone === "error" ? "bg-red-400" : tone === "warn" ? "bg-amber-300" : tone === "success" ? "bg-emerald-300" : "bg-sky-300"}`} />
+              <span className="truncate text-white/50">{status}</span>
+              {busy && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-white/45" />}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant={mode === "sprite" ? "primary" : "secondary"} onClick={() => setMode("sprite")}>
-              <Film className="h-3.5 w-3.5" />
-              Sprite 处理
-            </Button>
-            <Button variant={mode === "line-cleaner" ? "primary" : "secondary"} onClick={() => setMode("line-cleaner")}>
-              <Eraser className="h-3.5 w-3.5" />
-              线稿清理
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="secondary" onClick={() => setMode((current) => current === "sprite" ? "line-cleaner" : "sprite")}>
+              {mode === "sprite" ? <Eraser className="h-3.5 w-3.5" /> : <Film className="h-3.5 w-3.5" />}
+              {mode === "sprite" ? "线稿清理" : "返回 Sprite 处理"}
             </Button>
           </div>
         </header>
 
         {mode === "sprite" ? (
-          <div className="grid min-h-0 flex-1 grid-cols-[420px_minmax(0,1fr)] gap-4 overflow-hidden p-4">
-            <aside className="min-h-0 space-y-4 overflow-y-auto pr-1">
-              <SourcePanel
-                path={path}
-                setPath={setPath}
-                busy={busy}
-                upload={upload}
-                uploadFiles={uploadFiles}
-                importPath={importPath}
-              />
+          <div className="grid min-h-0 flex-1 grid-cols-[390px_390px_minmax(0,1fr)] gap-4 overflow-hidden px-4 pb-6">
+            <aside className="min-h-0 space-y-4 overflow-y-auto pr-1 no-scrollbar">
+              <SourcePanel upload={upload} uploadFiles={uploadFiles} videoRef={videoRef} mediaUrl={mediaUrl} />
               {upload && (
                 <TimelinePanel
                   upload={upload}
@@ -866,42 +1039,32 @@ export default function SpriteVideoLab() {
                   setEndFrame={(value) => setEndFrame(clamp(Math.round(value), startFrame, uploadFrameCount))}
                 />
               )}
-              <OptionsPanel options={options} setOptions={setOptions} />
+              <OptionsPanel options={options} setOptions={setOptions} detectedKeyColor={activePreview?.key_color} />
             </aside>
 
-            <section className="min-h-0 space-y-4 overflow-y-auto pr-1">
-              <div className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4">
-                <Panel
-                  title="源画面预览"
-                  kicker="Preview"
-                  action={upload && <span className="text-xs text-white/42">{currentMediaType === "video" ? "静音循环预览" : "静态源素材"}</span>}
-                >
-                  <div className="aspect-video overflow-hidden rounded-lg border border-white/10 bg-black/35">
-                    {!upload ? (
-                      <EmptyStage label="等待导入素材" />
-                    ) : currentMediaType === "video" ? (
-                      <video ref={videoRef} src={mediaUrl} muted playsInline loop controls className="h-full w-full object-contain" />
-                    ) : (
-                      <img src={mediaUrl} alt="源素材预览" className="h-full w-full object-contain" />
-                    )}
+            <section className="h-full min-h-0 overflow-y-auto pr-1 no-scrollbar">
+              <Panel
+                title="参数预览"
+                className="min-h-full"
+                action={
+                  <button
+                    type="button"
+                    disabled={!upload || busy === "preview"}
+                    onClick={() => void previewFrame()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-200/80 transition hover:text-sky-100 disabled:opacity-40"
+                  >
+                    {busy === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    预览当前帧
+                  </button>
+                }
+              >
+                <div className="space-y-3">
+                  <div className="grid gap-2">
+                    <PreviewImage title="原始抽帧" url={activePreview?.source_url} compact />
+                    <PreviewImage title="参数结果" url={activePreview?.processed_url} bgMode={previewBgMode} bgColor={previewBg} compact />
                   </div>
-                </Panel>
-
-                <Panel
-                  title="套用参数预览"
-                  kicker="Compare"
-                  action={
-                    <Button disabled={!upload || busy === "preview"} onClick={previewFrame} variant="primary">
-                      {busy === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                      预览当前帧
-                    </Button>
-                  }
-                >
-                  <div className="grid grid-cols-2 gap-3">
-                    <PreviewImage title="原始抽帧" url={preview?.source_url} />
-                    <PreviewImage title="套用参数后" url={preview?.processed_url} bgMode={previewBgMode} bgColor={previewBg} />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2">
+                    <SectionLabel>显示</SectionLabel>
                     <Field label="结果背景">
                       <Select value={previewBgMode} onChange={(event) => setPreviewBgMode(event.target.value as "checkerboard" | "color")}>
                         <option value="checkerboard">棋盘格</option>
@@ -909,92 +1072,166 @@ export default function SpriteVideoLab() {
                       </Select>
                     </Field>
                     <Field label="背景色">
-                      <TextInput type="color" value={previewBg} onChange={(event) => setPreviewBg(event.target.value)} />
+                      <ColorField value={previewBg} onChange={(value) => setPreviewBg(value)} />
                     </Field>
-                    <Button disabled={!preview} onClick={() => postprocessPreview("green-to-black")}>绿边转黑</Button>
-                    <Button disabled={!preview} onClick={() => postprocessPreview("green-desaturate")}>绿边去饱和</Button>
-                    <Button disabled={!preview} onClick={() => postprocessPreview("semitransparent-to-black")}>半透明转黑</Button>
-                    <Button disabled={!preview} onClick={() => postprocessPreview("semitransparent-to-opaque")}>半透明转不透明</Button>
-                    <Button disabled={!preview?.processed_url} onClick={() => preview?.processed_url && downloadUrl(preview.processed_url, "sprite-preview.png")}>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs">
+                      <span className="text-white/40">检测背景色</span>
+                      {activePreview?.key_color ? (
+                        <span className="inline-flex items-center gap-2 text-white/72">
+                          <span className="h-4 w-4 rounded border border-white/15" style={{ backgroundColor: activePreview.key_color }} />
+                          {activePreview.key_color.toUpperCase()}
+                        </span>
+                      ) : (
+                        <span className="text-white/25">预览后显示</span>
+                      )}
+                    </div>
+                  </section>
+                  <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2">
+                    <SectionLabel>预览后处理</SectionLabel>
+                    <div className="grid grid-cols-2 gap-2">
+                      {PREVIEW_POSTPROCESS_KINDS.map((kind) => {
+                        const changed = previewPostprocessChanged(activePreview, kind);
+                        const applied = Boolean(previewPostprocessStats(activePreview, kind)?.enabled) && changed !== 0;
+                        const processing = busy === kind;
+                        return (
+                          <Button
+                            key={kind}
+                            disabled={!activePreview || (Boolean(busy) && !processing)}
+                            onClick={() => postprocessPreview(kind)}
+                            variant={applied ? "primary" : "secondary"}
+                            className={applied ? "ring-1 ring-sky-300/25" : ""}
+                          >
+                            {processing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                            <span>{PREVIEW_POSTPROCESS[kind].label}</span>
+                            {changed !== null && changed > 0 && (
+                              <span className="rounded-full bg-sky-300/18 px-1.5 py-0.5 text-[10px] text-sky-100">
+                                {changed > 999 ? `${Math.round(changed / 1000)}k` : changed}
+                              </span>
+                            )}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] leading-4 text-white/35">
+                      这里只影响当前单帧预览；最终批量处理请用左侧「批处理」开关。
+                    </p>
+                    <Button disabled={!activePreview?.processed_url} onClick={() => activePreview?.processed_url && downloadUrl(activePreview.processed_url, "sprite-preview.png")} className="w-full">
                       <Download className="h-3.5 w-3.5" />
                       下载预览
                     </Button>
-                  </div>
-                </Panel>
-              </div>
+                  </section>
+                </div>
+              </Panel>
+            </section>
 
+            <section className="h-full min-h-0 overflow-y-auto pr-1 no-scrollbar">
               <Panel
-                title="帧检查与导出"
-                kicker="Review"
-                action={
-                  <div className="flex gap-2">
-                    <FileButton onFiles={importAnimation} multiple label="导入帧序列" icon={<ImagePlus className="h-3.5 w-3.5" />} />
-                    <Button disabled={!upload || busy === "process"} onClick={processSource} variant="primary">
-                      {busy === "process" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      开始处理区间
-                    </Button>
-                  </div>
-                }
+                title="创作处理"
+                className="relative min-h-full"
               >
-                <div className="grid grid-cols-[330px_minmax(0,1fr)] gap-4">
-                  <div className="space-y-3">
-                    <div className="relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]" style={{ backgroundColor: animationBg }}>
-                      <canvas ref={animationCanvasRef} width={512} height={512} className="h-full w-full" />
-                      {!selectedForPreview.length && <EmptyStage label="还没有帧" />}
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-white/60">
-                      <strong className="text-white/80">
-                        当前 {selectedForPreview[currentPreviewIndex] ? `#${String(selectedForPreview[currentPreviewIndex]!.index + 1).padStart(3, "0")}` : "-"}
-                      </strong>
-                      <span>{selectedForPreview.length ? `${currentPreviewIndex + 1} / ${selectedForPreview.length}` : "0 / 0"}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button disabled={selectedForPreview.length <= 1} onClick={() => setPlaying((value) => !value)}>
-                        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                        {playing ? "暂停预览" : "播放预览"}
-                      </Button>
-                      <Button disabled={!selectedForPreview.length} onClick={() => setCurrentPreviewIndex(0)}>
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        重播
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field label="背景">
-                        <TextInput type="color" value={animationBg} onChange={(event) => setAnimationBg(event.target.value)} />
-                      </Field>
-                      <Field label="间隔 ms">
-                        <TextInput type="number" min={20} max={5000} value={intervalMs} onChange={(event) => setIntervalMs(clamp(Number(event.target.value || 100), 20, 5000))} />
-                      </Field>
-                    </div>
-                    <Check checked={reverse} onChange={setReverse} label="反向动画预览和导出" />
-                    <div className="flex flex-wrap gap-2">
-                      <Button disabled={!job || !selectedForPreview.length || busy === "export"} onClick={exportFrames} variant="primary">导出选中帧</Button>
-                      <Button variant={magicResizeMode === "hard" ? "magic" : "secondary"} onClick={() => setMagicResizeMode("hard")}>硬</Button>
-                      <Button variant={magicResizeMode === "soft" ? "magic" : "secondary"} onClick={() => setMagicResizeMode("soft")}>软</Button>
-                      <Button disabled={!job || !selectedForPreview.length || busy === "magic"} onClick={runMagic} variant="magic">MAGIC</Button>
-                    </div>
-                  </div>
-
-                  <div className="min-w-0 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong className="text-sm text-white/82">已选 {selected.size} / {job?.frame_count || 0} 帧</strong>
-                      <div className="flex flex-wrap gap-2">
-                        <Button disabled={!job} onClick={() => selectBy(() => true)}>全选</Button>
-                        <Button disabled={!job} onClick={() => selectBy(() => false)}>全不选</Button>
-                        <Button disabled={!job} onClick={() => selectBy((frame) => (frame.index + 1) % 2 === 1)}>奇数帧</Button>
-                        <Button disabled={!job} onClick={() => selectBy((frame) => (frame.index + 1) % 2 === 0)}>偶数帧</Button>
-                        <Button disabled={!job} onClick={() => job && selectBy((frame) => !selected.has(frame.index))}>反选</Button>
-                        <Button disabled={!job} variant={orderedSelection ? "primary" : "secondary"} onClick={() => setOrderedSelection((value) => !value)}>按选序</Button>
-                        <Button disabled={!job?.processed_dir} onClick={() => openPath(job?.processed_dir)}>
-                          <FolderOpen className="h-3.5 w-3.5" />
-                          处理目录
-                        </Button>
+                <div className="absolute right-4 top-[18px] z-10 flex flex-wrap items-center justify-end gap-2">
+                  <FileButton onFiles={importAnimation} multiple label="导入帧序列" icon={<ImagePlus className="h-3.5 w-3.5" />} accent />
+                  <Button disabled={!upload || busy === "process"} onClick={processSource} variant="primary">
+                    {busy === "process" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    开始处理区间
+                  </Button>
+                </div>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)] items-start gap-4">
+                    <div className="min-w-0 space-y-2">
+                      <div className="relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]" style={{ backgroundColor: animationBg }}>
+                        <canvas ref={animationCanvasRef} width={512} height={512} className="h-full w-full" />
+                        {!selectedForPreview.length && <EmptyStage label="开始处理区间后显示结果" />}
+                        <div className="absolute left-2 top-2 z-10 inline-flex h-7 items-center rounded-xl border border-white/15 bg-black/45 px-2.5 text-[11px] font-medium text-white/90 shadow-md shadow-black/25 backdrop-blur-2xl">
+                          当前 {selectedForPreview.length ? `${currentPreviewIndex + 1} / ${selectedForPreview.length}` : "0 / 0"}
+                        </div>
+                        <div className="absolute right-2 top-2 z-10 flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={selectedForPreview.length <= 1}
+                            onClick={() => setPlaying((value) => !value)}
+                            className="inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-black/45 px-2.5 text-[11px] font-medium text-white/90 shadow-md shadow-black/25 backdrop-blur-2xl transition hover:bg-black/60 focus:outline-none focus:ring-2 focus:ring-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                            {playing ? "暂停" : "播放"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!selectedForPreview.length}
+                            onClick={() => setCurrentPreviewIndex(0)}
+                            className="inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-black/45 px-2.5 text-[11px] font-medium text-white/90 shadow-md shadow-black/25 backdrop-blur-2xl transition hover:bg-black/60 focus:outline-none focus:ring-2 focus:ring-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            重播
+                          </button>
+                        </div>
                       </div>
                     </div>
-
+                    <div className="flex min-h-full min-w-0 max-w-full flex-col items-start justify-between gap-3 self-stretch">
+                      <div className="flex max-w-full flex-col items-start gap-2">
+                        <div className="flex max-w-full flex-col items-start gap-3 px-1">
+                          <div className="w-full max-w-44">
+                            <Field label="背景">
+                              <ColorField value={animationBg} onChange={(value) => setAnimationBg(value)} />
+                            </Field>
+                          </div>
+                          <div className="w-full max-w-44">
+                            <Field label="间隔 ms">
+                              <TextInput type="number" min={20} max={5000} value={intervalMs} onChange={(event) => setIntervalMs(clamp(Number(event.target.value || 100), 20, 5000))} />
+                            </Field>
+                          </div>
+                        </div>
+                        <div className="grid max-w-full gap-1.5 px-1 text-xs text-white/58">
+                          <span>选择</span>
+                          <div className="flex max-w-full flex-wrap items-center gap-2">
+                            <ToolPill disabled={!job} active={selectState === "all"} onClick={() => selectBy(() => true)}>全选</ToolPill>
+                            <ToolPill disabled={!job} active={selectState === "none"} onClick={() => selectBy(() => false)}>全不选</ToolPill>
+                            <ToolPill disabled={!job} onClick={() => job && selectBy((frame) => !selected.has(frame.index))}>反选</ToolPill>
+                            <ToolPill disabled={!job} active={selectState === "odd"} onClick={() => selectBy((frame) => (frame.index + 1) % 2 === 1)}>奇数帧</ToolPill>
+                            <ToolPill disabled={!job} active={selectState === "even"} onClick={() => selectBy((frame) => (frame.index + 1) % 2 === 0)}>偶数帧</ToolPill>
+                            <ToolPill disabled={!job} active={orderedSelection} onClick={() => setOrderedSelection((value) => !value)}>按选序</ToolPill>
+                          </div>
+                        </div>
+                        <div className="grid max-w-full gap-1.5 px-1 text-xs text-white/58">
+                          <span>顺序</span>
+                          <label className="flex h-9 w-full max-w-44 cursor-pointer items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.07] px-3 text-xs text-white/70 transition hover:bg-white/[0.1] hover:text-white">
+                            <span className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-[6px] border transition ${reverse ? "border-white/40 bg-white" : "border-white/25 bg-white/[0.04]"}`}>
+                              {reverse && (
+                                <svg viewBox="0 0 16 16" className="h-3 w-3 text-zinc-900" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3.5 8.5l3 3 6-6.5" />
+                                </svg>
+                              )}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={reverse}
+                              onChange={(event) => setReverse(event.target.checked)}
+                              className="sr-only"
+                            />
+                            <span>反向动画预览和导出</span>
+                          </label>
+                        </div>
+                      </div>
+                      <div className="flex w-fit max-w-full flex-wrap items-center gap-2 px-1">
+                        <SurfaceActionButton disabled={!job?.processed_dir} onClick={() => openPath(job?.processed_dir)}>
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          处理目录
+                        </SurfaceActionButton>
+                        <SurfaceActionButton active={magicResizeMode === "hard"} onClick={() => setMagicResizeMode("hard")}>硬</SurfaceActionButton>
+                        <SurfaceActionButton active={magicResizeMode === "soft"} onClick={() => setMagicResizeMode("soft")}>软</SurfaceActionButton>
+                        <SurfaceActionButton disabled={!job || !selectedForPreview.length || busy === "magic"} onClick={runMagic}>MAGIC</SurfaceActionButton>
+                        <SurfaceActionButton disabled={!job || !selectedForPreview.length || busy === "export"} onClick={exportFrames} accent>导出选中帧</SurfaceActionButton>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {(magic || exportResult) && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <MagicPanel magic={magic} exportMagic={exportMagic} busy={busy} />
+                        <ExportPanel result={exportResult} openPath={openPath} />
+                      </div>
+                    )}
                     <FrameGrid job={job} selected={selected} order={selectionOrder} ordered={orderedSelection} toggleFrame={toggleFrame} />
-                    <MagicPanel magic={magic} exportMagic={exportMagic} busy={busy} />
-                    <ExportPanel result={exportResult} openPath={openPath} />
                   </div>
                 </div>
               </Panel>
@@ -1034,68 +1271,189 @@ export default function SpriteVideoLab() {
           />
         )}
 
-        <footer className="flex h-10 shrink-0 items-center gap-2 border-t border-white/10 bg-black/25 px-5 text-xs backdrop-blur-2xl">
-          <span className={`h-2 w-2 rounded-full ${tone === "error" ? "bg-red-400" : tone === "warn" ? "bg-amber-300" : tone === "success" ? "bg-emerald-300" : "bg-sky-300"}`} />
-          <span className="truncate text-white/64">{status}</span>
-          {busy && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-white/45" />}
-        </footer>
       </div>
     </main>
   );
 }
 
 function SourcePanel({
-  path,
-  setPath,
-  busy,
   upload,
   uploadFiles,
-  importPath,
+  videoRef,
+  mediaUrl,
 }: {
-  path: string;
-  setPath: (value: string) => void;
-  busy: string;
   upload: SpriteUpload | null;
   uploadFiles: (files: File[]) => void;
-  importPath: () => void;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  mediaUrl: string;
 }) {
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     void uploadFiles(Array.from(event.dataTransfer.files || []));
   };
   const info = uploadInfo(upload);
+  const hasUpload = Boolean(upload);
+  const fpsLabel = mediaType(upload) === "image_sequence"
+    ? `${info.frame_count || 0} 张`
+    : info.fps ? `${Number(info.fps).toFixed(2)} fps` : "-";
+  const durationLabel = info.duration
+    ? formatSeconds(info.duration)
+    : mediaType(upload) === "image" ? "单张图片" : "-";
   return (
-    <Panel title="导入源素材" kicker="Input">
-      <div className="space-y-3">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-          <TextInput value={path} onChange={(event) => setPath(event.target.value)} placeholder="/Users/me/take_01.mp4 或 D:\\media\\take_01.mp4" />
-          <Button disabled={busy === "import-path"} onClick={importPath} variant="primary">导入</Button>
+    <Panel title="导入源素材">
+      <label
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={onDrop}
+        className="group flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/12 bg-white/[0.03] px-3 py-2.5 text-left transition duration-200 hover:border-sky-300/30 hover:bg-white/[0.06]"
+      >
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.08] text-sky-200 transition duration-200 group-hover:bg-white/[0.14]">
+          <Upload className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-white/85">拖入或点击选择文件</p>
+          <p className="truncate text-[11px] leading-4 text-white/35">视频 / GIF / 图片 / 序列帧</p>
         </div>
-        <label
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={onDrop}
-          className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/15 bg-white/[0.045] px-4 text-center transition hover:bg-white/[0.08]"
-        >
-          <Upload className="h-6 w-6 text-sky-200/70" />
-          <span className="text-sm text-white/78">拖入文件或点击选择</span>
-          <span className="text-xs leading-5 text-white/38">MP4 / MOV / MKV / WebM / GIF / PNG / JPG / WebP / BMP，多图会按文件名组成序列</span>
-          <input
-            type="file"
-            multiple
-            accept=".mp4,.mov,.mkv,.webm,.gif,.png,.jpg,.jpeg,.webp,.bmp,video/*,image/*"
-            className="hidden"
-            onChange={(event) => void uploadFiles(Array.from(event.target.files || []))}
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <Meta label="素材" value={upload?.display_name || "未导入"} />
-          <Meta label="类型" value={upload ? mediaType(upload) : "-"} />
-          <Meta label="尺寸" value={info.width && info.height ? `${info.width} x ${info.height}` : "-"} />
-          <Meta label="帧率/数量" value={mediaType(upload) === "image_sequence" ? `${info.frame_count || 0} 张` : info.fps ? `${Number(info.fps).toFixed(2)} fps` : "-"} />
-          <Meta label="时长" value={info.duration ? formatSeconds(info.duration) : mediaType(upload) === "image" ? "单张图片" : "-"} />
+        <input
+          type="file"
+          multiple
+          accept=".mp4,.mov,.mkv,.webm,.gif,.png,.jpg,.jpeg,.webp,.bmp,video/*,image/*"
+          className="hidden"
+          onChange={(event) => void uploadFiles(Array.from(event.target.files || []))}
+        />
+      </label>
+      {hasUpload && (
+        <div className="mt-3 aspect-video overflow-hidden rounded-lg border border-white/10 bg-black/35">
+          {mediaType(upload) === "video" ? (
+            <video ref={videoRef} src={mediaUrl} muted playsInline loop controls className="h-full w-full object-contain" />
+          ) : (
+            <img src={mediaUrl} alt="源素材预览" className="h-full w-full object-contain" />
+          )}
         </div>
-      </div>
+      )}
+      {hasUpload ? (
+        <dl className="mt-3 space-y-1.5 text-xs">
+          {[
+            ["素材", upload?.display_name || "-"],
+            ["类型", mediaType(upload)],
+            ["尺寸", info.width && info.height ? `${info.width} × ${info.height}` : "-"],
+            ["帧率", fpsLabel],
+            ["时长", durationLabel],
+          ].map(([label, value]) => (
+            <div key={label} className="flex items-baseline justify-between gap-3">
+              <dt className="shrink-0 text-white/35">{label}</dt>
+              <dd className="min-w-0 truncate text-right text-white/80">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-2.5 text-[11px] leading-4 text-white/28">
+          支持 MP4 / MOV / MKV / WebM / GIF / PNG / JPG / WebP / BMP，多图按文件名组成序列
+        </p>
+      )}
     </Panel>
+  );
+}
+
+function RangeSlider({
+  min,
+  max,
+  start,
+  end,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  start: number;
+  end: number;
+  onChange: (start: number, end: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<"start" | "end" | null>(null);
+
+  const span = Math.max(1, max - min);
+  const startPct = ((clamp(start, min, max) - min) / span) * 100;
+  const endPct = ((clamp(end, min, max) - min) / span) * 100;
+
+  const valueFromClientX = (clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return min;
+    const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
+    return Math.round(min + ratio * (max - min));
+  };
+
+  const applyDrag = (clientX: number) => {
+    const value = valueFromClientX(clientX);
+    if (draggingRef.current === "start") {
+      onChange(clamp(value, min, end), end);
+    } else if (draggingRef.current === "end") {
+      onChange(start, clamp(value, start, max));
+    }
+  };
+
+  const beginDrag = (edge: "start" | "end", clientX: number, target: HTMLElement, pointerId: number) => {
+    draggingRef.current = edge;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      /* noop */
+    }
+    applyDrag(clientX);
+  };
+
+  const handleTrackPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const value = valueFromClientX(event.clientX);
+    const edge = Math.abs(value - start) <= Math.abs(value - end) ? "start" : "end";
+    beginDrag(edge, event.clientX, event.currentTarget, event.pointerId);
+  };
+
+  const handleHandlePointerDown = (edge: "start" | "end") => (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    beginDrag(edge, event.clientX, event.currentTarget, event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent) => {
+    if (draggingRef.current) applyDrag(event.clientX);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = null;
+    try {
+      (event.target as HTMLElement).releasePointerCapture(event.pointerId);
+    } catch {
+      /* noop */
+    }
+  };
+
+  return (
+    <div className="relative flex h-6 select-none items-center px-2">
+      <div
+        ref={trackRef}
+        onPointerDown={handleTrackPointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        className="relative h-1.5 w-full cursor-pointer rounded-full border border-white/10 bg-zinc-800/80 backdrop-blur-sm"
+      >
+        <div
+          className="absolute inset-y-0 rounded-full bg-white/40 shadow-[0_0_8px_rgba(255,255,255,0.15)]"
+          style={{ left: `${startPct}%`, right: `${100 - endPct}%` }}
+        />
+        <button
+          type="button"
+          aria-label="起始帧手柄"
+          onPointerDown={handleHandlePointerDown("start")}
+          className="absolute top-1/2 z-20 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border border-white/15 bg-zinc-900/85 shadow-md shadow-black/50 backdrop-blur-md transition hover:scale-110 active:cursor-grabbing"
+          style={{ left: `${startPct}%` }}
+        />
+        <button
+          type="button"
+          aria-label="结束帧手柄"
+          onPointerDown={handleHandlePointerDown("end")}
+          className="absolute top-1/2 z-20 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border border-white/15 bg-zinc-900/85 shadow-md shadow-black/50 backdrop-blur-md transition hover:scale-110 active:cursor-grabbing"
+          style={{ left: `${endPct}%` }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -1113,24 +1471,56 @@ function TimelinePanel({
   setEndFrame: (value: number) => void;
 }) {
   const count = frameCountForUpload(upload);
+  const info = uploadInfo(upload);
+  const isVideo = mediaType(upload) === "video";
+  const fps = Number(info.fps || 0);
+  const duration = Number(info.duration || 0);
+
   if (mediaType(upload) === "image") {
     return (
-      <Panel title="截取区间" kicker="Timeline">
+      <Panel title="截取区间">
         <p className="text-sm text-white/58">单张图片模式，无需调整区间。</p>
       </Panel>
     );
   }
+
+  const selectedCount = Math.max(1, endFrame - startFrame + 1);
+  const selectedDuration = isVideo && fps > 0 ? selectedCount / fps : 0;
+  const startTime = isVideo ? frameToTime(upload, startFrame, "start") : 0;
+  const endTime = isVideo ? frameToTime(upload, endFrame, "end") : 0;
+
   return (
-    <Panel title="截取区间" kicker="Timeline" action={<span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs text-white/55">{Math.max(1, endFrame - startFrame + 1)} 帧</span>}>
-      <div className="space-y-3">
-        <Field label="起始帧">
-          <TextInput type="number" min={1} max={count} value={startFrame} onChange={(event) => setStartFrame(Number(event.target.value))} />
-          <input type="range" min={1} max={count} value={startFrame} onChange={(event) => setStartFrame(Number(event.target.value))} className="w-full accent-sky-300" />
-        </Field>
-        <Field label="结束帧">
-          <TextInput type="number" min={startFrame} max={count} value={endFrame} onChange={(event) => setEndFrame(Number(event.target.value))} />
-          <input type="range" min={1} max={count} value={endFrame} onChange={(event) => setEndFrame(Number(event.target.value))} className="w-full accent-sky-300" />
-        </Field>
+    <Panel title="截取区间">
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="起始帧">
+            <TextInput type="number" min={1} max={count} value={startFrame} onChange={(event) => setStartFrame(Number(event.target.value))} />
+          </Field>
+          <Field label="结束帧">
+            <TextInput type="number" min={startFrame} max={count} value={endFrame} onChange={(event) => setEndFrame(Number(event.target.value))} />
+          </Field>
+        </div>
+
+        <RangeSlider
+          min={1}
+          max={count}
+          start={startFrame}
+          end={endFrame}
+          onChange={(start, end) => {
+            setStartFrame(start);
+            setEndFrame(end);
+          }}
+        />
+
+        <div className="flex items-center justify-between text-[11px] text-white/40">
+          <span>第 1 帧{isVideo && duration > 0 ? ` · ${formatSeconds(0)}` : ""}</span>
+          <span className="text-white/55">
+            {isVideo && selectedDuration > 0
+              ? `${formatSeconds(startTime)} → ${formatSeconds(endTime)}`
+              : `已选 ${selectedCount} 帧`}
+          </span>
+          <span>第 {count} 帧{isVideo && duration > 0 ? ` · ${formatSeconds(duration)}` : ""}</span>
+        </div>
       </div>
     </Panel>
   );
@@ -1139,9 +1529,11 @@ function TimelinePanel({
 function OptionsPanel({
   options,
   setOptions,
+  detectedKeyColor,
 }: {
   options: ProcessingOptions;
   setOptions: React.Dispatch<React.SetStateAction<ProcessingOptions>>;
+  detectedKeyColor?: string;
 }) {
   const patch = (value: Partial<ProcessingOptions>) => setOptions((current) => ({ ...current, ...value }));
   const isChroma =
@@ -1154,64 +1546,109 @@ function OptionsPanel({
   const isSlowMatte =
     options.matteMode.includes("birefnet") || options.matteMode.includes("corridorkey");
   return (
-    <Panel title="抠图算法与输出" kicker="Matte">
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="保留每 N 帧">
-            <TextInput type="number" min={1} value={options.keepEvery} onChange={(event) => patch({ keepEvery: Math.max(1, Number(event.target.value || 1)) })} />
-          </Field>
-          <Field label="输出尺寸 %">
-            <TextInput type="number" min={5} max={200} step={5} value={options.outputScale} onChange={(event) => patch({ outputScale: clamp(Number(event.target.value || 100), 5, 200) })} />
-          </Field>
-          <Field label="画布布局">
-            <Select value={options.canvasMode} onChange={(event) => patch({ canvasMode: event.target.value as ProcessingOptions["canvasMode"] })}>
-              <option value="auto">自动宽度，居中</option>
-              <option value="square_bottom">方形画布，底部对齐</option>
-              <option value="square_center">方形画布，居中</option>
-            </Select>
-          </Field>
-          <Field label="画布边距">
-            <TextInput type="number" min={0} value={options.reducePx} onChange={(event) => patch({ reducePx: Math.max(0, Number(event.target.value || 0)) })} />
-          </Field>
-        </div>
-        <Check checked={options.chromaEnabled} onChange={(checked) => patch({ chromaEnabled: checked })} label="启用抠背景并输出透明 PNG" />
-        <Field label="算法">
-          <Select value={options.matteMode} disabled={!options.chromaEnabled} onChange={(event) => patch({ matteMode: event.target.value as ProcessingOptions["matteMode"] })}>
-            {MATTE_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </Select>
-          {isSlowMatte && (
-            <span className="text-[11px] leading-4 text-amber-200/70">
-              慢速模式会加载 AI/CorridorKey 模型，首次预览可能很久；批量处理前建议先单帧确认。
-            </span>
-          )}
-        </Field>
-        {(isChroma || isCorridor) && (
+    <Panel title="处理参数">
+      <div className="space-y-3">
+        <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2.5">
+          <SectionLabel>输出</SectionLabel>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="取色方式">
-              <Select value={options.keyMode} onChange={(event) => patch({ keyMode: event.target.value as "auto" | "manual" })}>
-                <option value="auto">自动取背景色</option>
-                <option value="manual">手动指定颜色</option>
+            <Field label="保留每 N 帧">
+              <TextInput type="number" min={1} value={options.keepEvery} onChange={(event) => patch({ keepEvery: Math.max(1, Number(event.target.value || 1)) })} />
+            </Field>
+            <Field label="输出尺寸 %">
+              <TextInput type="number" min={5} max={200} step={5} value={options.outputScale} onChange={(event) => patch({ outputScale: clamp(Number(event.target.value || 100), 5, 200) })} />
+            </Field>
+            <Field label="画布布局">
+              <Select value={options.canvasMode} onChange={(event) => patch({ canvasMode: event.target.value as ProcessingOptions["canvasMode"] })}>
+                <option value="auto">自动宽度，居中</option>
+                <option value="square_bottom">方形画布，底部对齐</option>
+                <option value="square_center">方形画布，居中</option>
               </Select>
             </Field>
-            <Field label="背景色">
-              <TextInput type="color" value={options.manualKeyHex} onChange={(event) => patch({ manualKeyHex: event.target.value })} />
+            <Field label="画布边距">
+              <TextInput type="number" min={0} value={options.reducePx} onChange={(event) => patch({ reducePx: Math.max(0, Number(event.target.value || 0)) })} />
             </Field>
-            <Field label="阈值"><TextInput type="number" value={options.threshold} onChange={(event) => patch({ threshold: Number(event.target.value || 0) })} /></Field>
-            <Field label="边缘柔化"><TextInput type="number" value={options.softness} onChange={(event) => patch({ softness: Number(event.target.value || 0) })} /></Field>
           </div>
-        )}
-        {options.chromaEnabled && (
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="去溢色"><TextInput type="number" min={0} max={1} step={0.05} value={options.despillStrength} onChange={(event) => patch({ despillStrength: Number(event.target.value || 0) })} /></Field>
-            <Field label="Halo 收边"><TextInput type="number" min={0} value={options.haloPixels} onChange={(event) => patch({ haloPixels: Number(event.target.value || 0) })} /></Field>
-          </div>
-        )}
+        </section>
+
+        <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2.5">
+          <SectionLabel>抠图</SectionLabel>
+          <Check checked={options.chromaEnabled} onChange={(checked) => patch({ chromaEnabled: checked })} label="启用抠背景并输出透明 PNG" />
+          <Field label="算法">
+            <Select value={options.matteMode} disabled={!options.chromaEnabled} onChange={(event) => patch({ matteMode: event.target.value as ProcessingOptions["matteMode"] })}>
+              {MATTE_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </Select>
+            <span className="text-[11px] leading-4 text-white/36">
+              {MATTE_MODE_HELP[options.matteMode]}
+            </span>
+            {isSlowMatte && (
+              <span className="text-[11px] leading-4 text-amber-200/70">
+                慢速模式会加载 AI/CorridorKey 模型，首次预览可能很久；批量处理前建议先单帧确认。
+              </span>
+            )}
+          </Field>
+          {(isChroma || isCorridor) && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="取色方式">
+                <Select value={options.keyMode} onChange={(event) => patch({ keyMode: event.target.value as "auto" | "manual" })}>
+                  <option value="auto">自动取背景色</option>
+                  <option value="manual">手动指定颜色</option>
+                </Select>
+              </Field>
+              <Field
+                label={options.keyMode === "auto" ? "检测背景色" : "背景色"}
+                hint={undefined}
+              >
+                {options.keyMode === "auto" ? (
+                  <div className="flex h-9 w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-3 text-xs text-white/70">
+                    {detectedKeyColor ? (
+                      <>
+                        <span className="h-5 w-5 rounded-md border border-white/10" style={{ backgroundColor: detectedKeyColor }} />
+                        <span>{detectedKeyColor.toUpperCase()}</span>
+                      </>
+                    ) : (
+                      <span className="text-white/30">预览后显示</span>
+                    )}
+                  </div>
+                ) : (
+                  <ColorField value={options.manualKeyHex} onChange={(value) => patch({ manualKeyHex: value })} />
+                )}
+              </Field>
+              <Field label="阈值"><TextInput type="number" value={options.threshold} onChange={(event) => patch({ threshold: Number(event.target.value || 0) })} /></Field>
+              <Field label="边缘柔化"><TextInput type="number" value={options.softness} onChange={(event) => patch({ softness: Number(event.target.value || 0) })} /></Field>
+            </div>
+          )}
+          {options.chromaEnabled && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="去溢色"><TextInput type="number" min={0} max={1} step={0.05} value={options.despillStrength} onChange={(event) => patch({ despillStrength: Number(event.target.value || 0) })} /></Field>
+              <Field label="Halo 收边"><TextInput type="number" min={0} value={options.haloPixels} onChange={(event) => patch({ haloPixels: Number(event.target.value || 0) })} /></Field>
+            </div>
+          )}
+          {isCorridor && (
+            <Field label="CorridorKey 幕布颜色">
+              <Select value={options.corridorkeyScreen} onChange={(event) => patch({ corridorkeyScreen: event.target.value as "auto" | "green" | "blue" })}>
+                <option value="auto">自动</option>
+                <option value="green">绿色</option>
+                <option value="blue">蓝色</option>
+              </Select>
+            </Field>
+          )}
+          {isLuma && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Luma 黑场"><TextInput type="number" value={options.lumaBlack} onChange={(event) => patch({ lumaBlack: Number(event.target.value || 0) })} /></Field>
+              <Field label="Luma 白场"><TextInput type="number" value={options.lumaWhite} onChange={(event) => patch({ lumaWhite: Number(event.target.value || 0) })} /></Field>
+              <Field label="Gamma"><TextInput type="number" step={0.05} value={options.lumaGamma} onChange={(event) => patch({ lumaGamma: Number(event.target.value || 1) })} /></Field>
+              <Field label="强度"><TextInput type="number" step={0.05} value={options.lumaStrength} onChange={(event) => patch({ lumaStrength: Number(event.target.value || 1) })} /></Field>
+            </div>
+          )}
+        </section>
+
         {isChroma && (
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+          <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2.5">
+            <SectionLabel>前景保护</SectionLabel>
             <Check checked={options.foregroundProtectEnabled} onChange={(checked) => patch({ foregroundProtectEnabled: checked })} label="保护前景近似颜色" />
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Field label="前景色">
-                <TextInput type="color" value={options.foregroundProtectHex} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectHex: event.target.value })} />
+                <ColorField value={options.foregroundProtectHex} disabled={!options.foregroundProtectEnabled} onChange={(value) => patch({ foregroundProtectHex: value })} />
               </Field>
               <Field label="保护容差">
                 <TextInput type="number" min={1} max={120} value={options.foregroundProtectTolerance} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectTolerance: clamp(Number(event.target.value || 34), 1, 120) })} />
@@ -1220,49 +1657,100 @@ function OptionsPanel({
                 <TextInput type="number" min={0} max={1} step={0.05} value={options.foregroundProtectStrength} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectStrength: clamp(Number(event.target.value || 1), 0, 1) })} />
               </Field>
             </div>
-          </div>
+          </section>
         )}
-        {isCorridor && (
-          <Field label="CorridorKey 幕布颜色">
-            <Select value={options.corridorkeyScreen} onChange={(event) => patch({ corridorkeyScreen: event.target.value as "auto" | "green" | "blue" })}>
-              <option value="auto">自动</option>
-              <option value="green">绿色</option>
-              <option value="blue">蓝色</option>
-            </Select>
-          </Field>
-        )}
-        {isLuma && (
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Luma 黑场"><TextInput type="number" value={options.lumaBlack} onChange={(event) => patch({ lumaBlack: Number(event.target.value || 0) })} /></Field>
-            <Field label="Luma 白场"><TextInput type="number" value={options.lumaWhite} onChange={(event) => patch({ lumaWhite: Number(event.target.value || 0) })} /></Field>
-            <Field label="Gamma"><TextInput type="number" step={0.05} value={options.lumaGamma} onChange={(event) => patch({ lumaGamma: Number(event.target.value || 1) })} /></Field>
-            <Field label="强度"><TextInput type="number" step={0.05} value={options.lumaStrength} onChange={(event) => patch({ lumaStrength: Number(event.target.value || 1) })} /></Field>
-          </div>
-        )}
-        <div className="grid grid-cols-1 gap-2">
-          <Check checked={options.batchGreenToBlack} onChange={(checked) => patch({ batchGreenToBlack: checked })} label="批处理：绿色残边转黑" />
-          <Check checked={options.batchGreenDesaturate} onChange={(checked) => patch({ batchGreenDesaturate: checked })} label="批处理：绿色残边饱和度归零" />
-          <Check checked={options.batchSemiTransparentToBlack} onChange={(checked) => patch({ batchSemiTransparentToBlack: checked })} label="批处理：半透明像素转黑" />
-          <Check checked={options.batchSemiTransparentToOpaque} onChange={(checked) => patch({ batchSemiTransparentToOpaque: checked })} label="批处理：半透明像素转不透明" />
-        </div>
+
+        <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2">
+          <SectionLabel>批处理</SectionLabel>
+          <Check checked={options.batchGreenToBlack} onChange={(checked) => patch({ batchGreenToBlack: checked })} label="绿色残边转黑" />
+          <Check checked={options.batchGreenDesaturate} onChange={(checked) => patch({ batchGreenDesaturate: checked })} label="绿色残边饱和度归零" />
+          <Check checked={options.batchSemiTransparentToBlack} onChange={(checked) => patch({ batchSemiTransparentToBlack: checked })} label="半透明像素转黑" />
+          <Check checked={options.batchSemiTransparentToOpaque} onChange={(checked) => patch({ batchSemiTransparentToOpaque: checked })} label="半透明像素转不透明" />
+        </section>
       </div>
     </Panel>
   );
 }
 
-function PreviewImage({ title, url, bgMode = "checkerboard", bgColor = "#F6FBF6" }: { title: string; url?: string; bgMode?: "checkerboard" | "color"; bgColor?: string }) {
+function PreviewImage({
+  title,
+  url,
+  bgMode = "checkerboard",
+  bgColor = "#F6FBF6",
+  compact = false,
+}: {
+  title: string;
+  url?: string;
+  bgMode?: "checkerboard" | "color";
+  bgColor?: string;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
+  const imageUrl = url ? spriteAssetUrl(url) : "";
+  const checkerboardClass = "bg-[linear-gradient(45deg,rgba(255,255,255,.08)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.08)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.08)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.08)_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px]";
+  const previewBgClass = bgMode === "checkerboard" ? checkerboardClass : "";
+  const previewStyle = bgMode === "color" ? { backgroundColor: bgColor } : undefined;
+
   return (
     <article>
       <div className="mb-2 flex items-center justify-between text-xs text-white/55">
         <span>{title}</span>
-        <Maximize2 className="h-3.5 w-3.5" />
+        <button
+          type="button"
+          disabled={!url}
+          onClick={() => setOpen(true)}
+          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-white/8 bg-white/[0.04] text-white/50 transition hover:bg-white/[0.09] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label={`放大查看${title}`}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div
-        className={`flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border border-white/10 ${bgMode === "checkerboard" ? "bg-[linear-gradient(45deg,rgba(255,255,255,.08)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.08)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.08)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.08)_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px]" : ""}`}
-        style={bgMode === "color" ? { backgroundColor: bgColor } : undefined}
+        className={`flex ${compact ? "h-[210px] 2xl:h-[250px]" : "aspect-[4/3]"} items-center justify-center overflow-hidden rounded-lg border border-white/10 ${previewBgClass}`}
+        style={previewStyle}
       >
-        {url ? <img src={spriteAssetUrl(url)} alt={title} className="h-full w-full object-contain" /> : <span className="text-xs text-white/28">等待预览</span>}
+        {imageUrl ? <img src={imageUrl} alt={title} className="h-full w-full object-contain" /> : <span className="text-xs text-white/28">等待预览</span>}
       </div>
+      {open && imageUrl &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/78 p-6 backdrop-blur-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
+            onMouseDown={() => setOpen(false)}
+          >
+            <div
+              className={`relative flex h-full max-h-[88vh] w-full max-w-6xl items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/60 p-4 shadow-2xl shadow-black/50 ${previewBgClass}`}
+              style={previewStyle}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="absolute left-4 top-4 rounded-lg border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-white/72 backdrop-blur-md">
+                {title}
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="absolute right-4 top-4 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-black/55 text-white/70 transition hover:bg-white/10 hover:text-white"
+                aria-label="关闭放大预览"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <img src={imageUrl} alt={title} className="max-h-full max-w-full object-contain" />
+            </div>
+          </div>,
+          document.body
+        )}
     </article>
   );
 }
@@ -1285,12 +1773,19 @@ function FrameGrid({
   }
   const orderMap = new Map(order.map((index, idx) => [index, idx + 1]));
   return (
-    <div className="grid max-h-[520px] grid-cols-[repeat(auto-fill,minmax(116px,1fr))] gap-2 overflow-y-auto rounded-lg border border-white/10 bg-black/15 p-2">
+    <div className="grid max-h-[520px] grid-cols-[repeat(auto-fill,minmax(116px,1fr))] gap-2 overflow-y-auto p-1 no-scrollbar">
       {job.frames.map((frame) => {
         const checked = selected.has(frame.index);
         return (
-          <label key={frame.index} className={`relative cursor-pointer overflow-hidden rounded-lg border bg-white/[0.04] p-2 transition ${checked ? "border-sky-300/45 ring-1 ring-sky-300/30" : "border-white/10 hover:border-white/20"}`}>
-            <input type="checkbox" checked={checked} onChange={(event) => toggleFrame(frame.index, event.target.checked)} className="absolute left-2 top-2 z-10 h-4 w-4 accent-sky-300" />
+          <label key={frame.index} className={`relative cursor-pointer overflow-hidden rounded-lg border bg-white/[0.04] p-2 transition ${checked ? "border-white/30 bg-white/[0.08] ring-1 ring-white/8" : "border-white/10 hover:border-white/20"}`}>
+            <input type="checkbox" checked={checked} onChange={(event) => toggleFrame(frame.index, event.target.checked)} className="sr-only" />
+            <span className={`absolute left-2 top-2 z-10 flex h-4 w-4 items-center justify-center rounded-[6px] border transition ${checked ? "border-white/40 bg-white" : "border-white/25 bg-white/[0.04]"}`}>
+              {checked && (
+                <svg viewBox="0 0 16 16" className="h-3 w-3 text-zinc-900" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3.5 8.5l3 3 6-6.5" />
+                </svg>
+              )}
+            </span>
             {ordered && checked && <span className="absolute right-2 top-2 z-10 rounded-full bg-sky-300 px-1.5 py-0.5 text-[10px] text-black">{orderMap.get(frame.index)}</span>}
             <img src={spriteAssetUrl(frame.thumb_url || frame.url)} alt={frame.name} className="aspect-square w-full rounded-md bg-black/25 object-contain" />
             <div className="mt-2 min-w-0 text-[11px] text-white/52">
@@ -1392,7 +1887,7 @@ function LineCleaner(props: {
   const saving = props.sourceBytes > 0 && props.processedBytes > 0 ? Math.round((1 - props.processedBytes / props.sourceBytes) * 100) : null;
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] gap-4 overflow-hidden p-4">
-      <aside className="space-y-4 overflow-y-auto pr-1">
+      <aside className="space-y-4 overflow-y-auto pr-1 no-scrollbar">
         <Panel title="动画帧缩小清理实验" kicker="Line Cleaner">
           <div className="space-y-3">
             <FileDrop onFiles={props.loadFiles} label="拖入透明 PNG / JPG / WebP / BMP 序列帧" />
@@ -1425,7 +1920,7 @@ function LineCleaner(props: {
           </div>
         </Panel>
       </aside>
-      <section className="min-h-0 overflow-y-auto pr-1">
+      <section className="min-h-0 overflow-y-auto pr-1 no-scrollbar">
         <Panel
           title="同步动画对比"
           kicker="Viewer"
@@ -1452,7 +1947,7 @@ function LineCleaner(props: {
               <canvas ref={props.processedCanvasRef} className="aspect-square w-full rounded-lg border border-white/10 bg-black/35" />
             </figure>
           </div>
-          <div className="mt-3 flex gap-2 overflow-x-auto rounded-lg border border-white/10 bg-black/15 p-2">
+          <div className="mt-3 flex gap-2 overflow-x-auto rounded-lg border border-white/10 bg-black/15 p-2 no-scrollbar">
             {props.frames.map((frame, index) => (
               <button key={frame.name + index} onClick={() => props.setCurrentIndex(index)} className={`h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-white/[0.04] ${index === props.currentIndex ? "border-sky-300/55" : "border-white/10"}`}>
                 <img src={frame.sourceUrl} alt={frame.name} className="h-full w-full object-contain" />
@@ -1482,9 +1977,15 @@ function FileDrop({ onFiles, label }: { onFiles: (files: File[]) => void; label:
   );
 }
 
-function FileButton({ onFiles, label, icon, multiple = false }: { onFiles: (files: File[]) => void; label: string; icon?: React.ReactNode; multiple?: boolean }) {
+function FileButton({ onFiles, label, icon, multiple = false, accent = false }: { onFiles: (files: File[]) => void; label: string; icon?: React.ReactNode; multiple?: boolean; accent?: boolean }) {
   return (
-    <label className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-3xl border border-white/10 bg-white/[0.07] px-3 text-xs font-medium text-white/80 shadow-lg shadow-black/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/[0.12]">
+    <label
+      className={`inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-3xl border px-3 text-xs font-medium shadow-lg shadow-black/20 backdrop-blur-xl transition hover:-translate-y-0.5 ${
+        accent
+          ? "border-orange-200/25 bg-[linear-gradient(135deg,rgba(251,146,60,0.34),rgba(12,12,14,0.82))] text-orange-50 hover:border-orange-200/40"
+          : "border-white/10 bg-white/[0.07] text-white/80 hover:bg-white/[0.12]"
+      }`}
+    >
       {icon}
       {label}
       <input type="file" multiple={multiple} accept=".png,.jpg,.jpeg,.webp,.bmp,image/*" className="hidden" onChange={(event: ChangeEvent<HTMLInputElement>) => onFiles(Array.from(event.target.files || []))} />

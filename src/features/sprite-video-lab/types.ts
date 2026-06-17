@@ -48,7 +48,7 @@ export type SpritePreview = {
   source_media_type?: UploadMediaType;
   matte?: Record<string, unknown>;
   options?: Record<string, unknown>;
-  postprocess?: Record<string, Record<string, number>>;
+  postprocess?: Record<string, { enabled?: boolean; changed_pixels?: number; [key: string]: unknown }>;
 };
 
 export type SpriteExport = {
