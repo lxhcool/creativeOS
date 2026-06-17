@@ -80,6 +80,10 @@ const DEFAULT_OPTIONS: ProcessingOptions = {
   softness: 8,
   despillStrength: 0.6,
   haloPixels: 1,
+  foregroundProtectEnabled: false,
+  foregroundProtectHex: "#2f8f3a",
+  foregroundProtectTolerance: 34,
+  foregroundProtectStrength: 1,
   corridorkeyScreen: "auto",
   lumaBlack: 0,
   lumaWhite: 85,
@@ -92,15 +96,16 @@ const DEFAULT_OPTIONS: ProcessingOptions = {
 };
 
 const MATTE_MODES = [
-  ["chroma", "chroma key"],
-  ["birefnet", "只用 BiRefNet"],
-  ["corridorkey", "只用 CorridorKey"],
+  ["chroma", "chroma key（快速）"],
+  ["birefnet_chroma", "BiRefNet 主体保护 / Chroma 去背景（慢速）"],
+  ["birefnet", "只用 BiRefNet（慢速）"],
+  ["corridorkey", "只用 CorridorKey（慢速）"],
   ["luma", "只用 Luma"],
-  ["birefnet_corridorkey", "BiRefNet 粗蒙版 / CorridorKey 精修边缘"],
-  ["birefnet_corridorkey_key", "BiRefNet 后再用 CorridorKey 收紧抠图"],
-  ["birefnet_luma", "BiRefNet 保主体 / Luma 补亮部"],
-  ["birefnet_luma_key", "BiRefNet 后再用 Luma 收紧抠图"],
-  ["birefnet_luma_corridorkey", "BiRefNet + Luma 合并后 / CorridorKey 精修"],
+  ["birefnet_corridorkey", "BiRefNet 粗蒙版 / CorridorKey 精修边缘（慢速）"],
+  ["birefnet_corridorkey_key", "BiRefNet 后再用 CorridorKey 收紧抠图（慢速）"],
+  ["birefnet_luma", "BiRefNet 保主体 / Luma 补亮部（慢速）"],
+  ["birefnet_luma_key", "BiRefNet 后再用 Luma 收紧抠图（慢速）"],
+  ["birefnet_luma_corridorkey", "BiRefNet + Luma 合并后 / CorridorKey 精修（慢速）"],
   ["none", "不抠图，只缩放对齐"],
 ] as const;
 
@@ -416,6 +421,10 @@ export default function SpriteVideoLab() {
       softness: options.softness,
       despill_strength: options.despillStrength,
       halo_pixels: options.haloPixels,
+      foreground_protect_enabled: options.foregroundProtectEnabled,
+      foreground_protect_hex: options.foregroundProtectHex,
+      foreground_protect_tolerance: options.foregroundProtectTolerance,
+      foreground_protect_strength: options.foregroundProtectStrength,
       ai_model: "birefnet-hr-matting",
       ai_device: "auto",
       ai_resolution: "auto",
@@ -1135,9 +1144,15 @@ function OptionsPanel({
   setOptions: React.Dispatch<React.SetStateAction<ProcessingOptions>>;
 }) {
   const patch = (value: Partial<ProcessingOptions>) => setOptions((current) => ({ ...current, ...value }));
-  const isChroma = options.chromaEnabled && (options.matteMode === "chroma" || options.matteMode === "corridorkey");
+  const isChroma =
+    options.chromaEnabled &&
+    (options.matteMode === "chroma" ||
+      options.matteMode === "corridorkey" ||
+      options.matteMode === "birefnet_chroma");
   const isLuma = options.chromaEnabled && options.matteMode.includes("luma");
   const isCorridor = options.chromaEnabled && options.matteMode.includes("corridorkey");
+  const isSlowMatte =
+    options.matteMode.includes("birefnet") || options.matteMode.includes("corridorkey");
   return (
     <Panel title="抠图算法与输出" kicker="Matte">
       <div className="space-y-4">
@@ -1164,6 +1179,11 @@ function OptionsPanel({
           <Select value={options.matteMode} disabled={!options.chromaEnabled} onChange={(event) => patch({ matteMode: event.target.value as ProcessingOptions["matteMode"] })}>
             {MATTE_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
+          {isSlowMatte && (
+            <span className="text-[11px] leading-4 text-amber-200/70">
+              慢速模式会加载 AI/CorridorKey 模型，首次预览可能很久；批量处理前建议先单帧确认。
+            </span>
+          )}
         </Field>
         {(isChroma || isCorridor) && (
           <div className="grid grid-cols-2 gap-2">
@@ -1184,6 +1204,22 @@ function OptionsPanel({
           <div className="grid grid-cols-2 gap-2">
             <Field label="去溢色"><TextInput type="number" min={0} max={1} step={0.05} value={options.despillStrength} onChange={(event) => patch({ despillStrength: Number(event.target.value || 0) })} /></Field>
             <Field label="Halo 收边"><TextInput type="number" min={0} value={options.haloPixels} onChange={(event) => patch({ haloPixels: Number(event.target.value || 0) })} /></Field>
+          </div>
+        )}
+        {isChroma && (
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <Check checked={options.foregroundProtectEnabled} onChange={(checked) => patch({ foregroundProtectEnabled: checked })} label="保护前景近似颜色" />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Field label="前景色">
+                <TextInput type="color" value={options.foregroundProtectHex} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectHex: event.target.value })} />
+              </Field>
+              <Field label="保护容差">
+                <TextInput type="number" min={1} max={120} value={options.foregroundProtectTolerance} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectTolerance: clamp(Number(event.target.value || 34), 1, 120) })} />
+              </Field>
+              <Field label="保护强度">
+                <TextInput type="number" min={0} max={1} step={0.05} value={options.foregroundProtectStrength} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectStrength: clamp(Number(event.target.value || 1), 0, 1) })} />
+              </Field>
+            </div>
           </div>
         )}
         {isCorridor && (

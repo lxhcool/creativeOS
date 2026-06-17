@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getSpriteVideoBackendUrl } from "@/server/sprite-video-backend";
+import { getSpriteWorkerOrigin } from "@/server/sprite-worker";
 
 export const runtime = "nodejs";
 
@@ -15,8 +15,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (range) headers.set("range", range);
 
   try {
-    const backendUrl = await getSpriteVideoBackendUrl();
-    const response = await fetch(`${backendUrl}${mediaPath}`, { headers, cache: "no-store" });
+    const workerOrigin = await getSpriteWorkerOrigin();
+    const response = await fetch(`${workerOrigin}${mediaPath}`, { headers, cache: "no-store" });
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         error:
           error instanceof Error
             ? error.message
-            : "Sprite Video Lab backend is not reachable.",
+            : "Sprite 处理引擎不可用。",
         scope: "creativeOS internal sprite worker",
       },
       { status: 502 },

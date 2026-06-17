@@ -92,6 +92,7 @@ export type ProcessingOptions = {
   matteMode:
     | "chroma"
     | "birefnet"
+    | "birefnet_chroma"
     | "corridorkey"
     | "luma"
     | "birefnet_corridorkey"
@@ -106,6 +107,10 @@ export type ProcessingOptions = {
   softness: number;
   despillStrength: number;
   haloPixels: number;
+  foregroundProtectEnabled: boolean;
+  foregroundProtectHex: string;
+  foregroundProtectTolerance: number;
+  foregroundProtectStrength: number;
   corridorkeyScreen: "auto" | "green" | "blue";
   lumaBlack: number;
   lumaWhite: number;
