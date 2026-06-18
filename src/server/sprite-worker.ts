@@ -11,6 +11,11 @@ declare global {
   var __creativeOsSpriteWorkerOrigin: string | undefined;
 }
 
+export function resetSpriteWorkerOrigin(): void {
+  globalThis.__creativeOsSpriteWorkerOrigin = undefined;
+  globalThis.__creativeOsSpriteWorkerStarting = undefined;
+}
+
 function allocateWorkerPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();

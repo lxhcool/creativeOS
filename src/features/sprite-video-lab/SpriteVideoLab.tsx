@@ -99,38 +99,38 @@ const DEFAULT_OPTIONS: ProcessingOptions = {
 };
 
 const MATTE_MODES = [
-  ["chroma", "chroma key（快速）"],
-  ["birefnet_chroma", "BiRefNet 主体保护 / Chroma 去背景（慢速）"],
-  ["birefnet", "只用 BiRefNet（慢速）"],
-  ["corridorkey", "只用 CorridorKey（慢速）"],
-  ["luma", "只用 Luma"],
-  ["birefnet_corridorkey", "BiRefNet 粗蒙版 / CorridorKey 精修边缘（慢速）"],
-  ["birefnet_corridorkey_key", "BiRefNet 后再用 CorridorKey 收紧抠图（慢速）"],
-  ["birefnet_luma", "BiRefNet 保主体 / Luma 补亮部（慢速）"],
-  ["birefnet_luma_key", "BiRefNet 后再用 Luma 收紧抠图（慢速）"],
-  ["birefnet_luma_corridorkey", "BiRefNet + Luma 合并后 / CorridorKey 精修（慢速）"],
-  ["none", "不抠图，只缩放对齐"],
+  ["chroma", "快速去绿幕"],
+  ["birefnet_chroma", "AI 保主体去背景"],
+  ["birefnet", "AI 抠主体"],
+  ["corridorkey", "精细绿幕"],
+  ["luma", "按明暗抠图"],
+  ["birefnet_corridorkey", "AI + 精细边缘"],
+  ["birefnet_corridorkey_key", "AI + 收紧绿边"],
+  ["birefnet_luma", "AI + 保留亮部"],
+  ["birefnet_luma_key", "AI + 明暗收边"],
+  ["birefnet_luma_corridorkey", "AI + 亮部 + 精细边缘"],
+  ["none", "不抠图"],
 ] as const;
 
 const MATTE_MODE_HELP: Record<ProcessingOptions["matteMode"], string> = {
-  chroma: "按背景色抠图；自动模式会从当前抽帧边角估计绿幕/纯色背景，并清理连通背景、深绿阴影和小块绿边。",
-  birefnet_chroma: "先用 BiRefNet 识别主体，再结合背景色去除幕布；适合主体颜色接近背景但速度较慢。",
-  birefnet: "只用 BiRefNet 主体分割，不依赖背景色；适合非纯色背景，首次加载和处理较慢。",
-  corridorkey: "只用 CorridorKey 做绿幕/蓝幕抠图；边缘更细，但模型启动较慢。",
-  luma: "按亮度生成透明度；适合黑白遮罩、发光或高反差素材。",
-  birefnet_corridorkey: "BiRefNet 给出主体范围，CorridorKey 细化边缘；质量优先，速度较慢。",
-  birefnet_corridorkey_key: "BiRefNet 后再用 CorridorKey 收紧背景，适合背景残留明显的素材。",
-  birefnet_luma: "BiRefNet 保主体，Luma 补亮部或特效边缘。",
-  birefnet_luma_key: "BiRefNet 后再用 Luma 收紧透明区域。",
-  birefnet_luma_corridorkey: "BiRefNet、Luma、CorridorKey 组合，适合复杂边缘但速度最慢。",
-  none: "不做抠图，只按当前尺寸和画布规则输出。",
+  chroma: "适合绿幕、蓝幕和纯色背景，速度最快。",
+  birefnet_chroma: "先找主体，再去背景；主体颜色接近背景时更稳。",
+  birefnet: "只靠 AI 找主体，不依赖背景色。",
+  corridorkey: "适合边缘要求更细的绿幕素材。",
+  luma: "按明暗生成透明度，适合遮罩或高反差素材。",
+  birefnet_corridorkey: "AI 找主体，模型细修边缘。",
+  birefnet_corridorkey_key: "AI 后再收紧背景残留。",
+  birefnet_luma: "AI 保主体，同时保留亮部特效。",
+  birefnet_luma_key: "AI 后用明暗继续收边。",
+  birefnet_luma_corridorkey: "质量优先，适合复杂边缘。",
+  none: "不去背景，只调整尺寸和画布。",
 };
 
 const PREVIEW_POSTPROCESS: Record<PreviewPostprocessKind, { label: string; route: string; manifestKey: string }> = {
-  "green-to-black": { label: "绿边转黑", route: "/preview-green-to-black", manifestKey: "green_to_black" },
-  "green-desaturate": { label: "去饱和", route: "/preview-green-desaturate", manifestKey: "green_desaturate" },
-  "semitransparent-to-black": { label: "半透转黑", route: "/preview-semitransparent-to-black", manifestKey: "semitransparent_to_black" },
-  "semitransparent-to-opaque": { label: "半透不透明", route: "/preview-semitransparent-to-opaque", manifestKey: "semitransparent_to_opaque" },
+  "green-to-black": { label: "绿边变暗", route: "/preview-green-to-black", manifestKey: "green_to_black" },
+  "green-desaturate": { label: "淡化绿边", route: "/preview-green-desaturate", manifestKey: "green_desaturate" },
+  "semitransparent-to-black": { label: "半透明变暗", route: "/preview-semitransparent-to-black", manifestKey: "semitransparent_to_black" },
+  "semitransparent-to-opaque": { label: "补实半透明", route: "/preview-semitransparent-to-opaque", manifestKey: "semitransparent_to_opaque" },
 };
 
 const PREVIEW_POSTPROCESS_KINDS = Object.keys(PREVIEW_POSTPROCESS) as PreviewPostprocessKind[];
@@ -461,7 +461,7 @@ function Check({
 
 export default function SpriteVideoLab() {
   const [mode, setMode] = useState<WorkbenchMode>("sprite");
-  const [status, setStatus] = useState("等待导入素材。");
+  const [status, setStatus] = useState("请先导入素材。");
   const [tone, setTone] = useState<Tone>("idle");
   const [busy, setBusy] = useState("");
   const [upload, setUpload] = useState<SpriteUpload | null>(null);
@@ -470,7 +470,7 @@ export default function SpriteVideoLab() {
   const [endFrame, setEndFrame] = useState(1);
   const [preview, setPreview] = useState<SpritePreview | null>(null);
   const [previewBgMode, setPreviewBgMode] = useState<"checkerboard" | "color">("checkerboard");
-  const [previewBg, setPreviewBg] = useState("#F6FBF6");
+  const [previewBg, setPreviewBg] = useState("#070707");
   const [job, setJob] = useState<SpriteJob | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [selectionOrder, setSelectionOrder] = useState<number[]>([]);
@@ -479,7 +479,7 @@ export default function SpriteVideoLab() {
   const [playing, setPlaying] = useState(true);
   const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [intervalMs, setIntervalMs] = useState(100);
-  const [animationBg, setAnimationBg] = useState("#F6FBF6");
+  const [animationBg, setAnimationBg] = useState("#070707");
   const [exportResult, setExportResult] = useState<SpriteExport | null>(null);
   const [magic, setMagic] = useState<SpriteMagic | null>(null);
   const [magicResizeMode, setMagicResizeMode] = useState<"hard" | "soft">("hard");
@@ -559,11 +559,11 @@ export default function SpriteVideoLab() {
     if (!files.length) return;
     const sorted = sortFiles(files);
     if (sorted.length > 1 && !sorted.every(isSupportedImage)) {
-      setMessage("多文件导入只支持图片序列帧。", "warn");
+      setMessage("多文件只支持图片序列。", "warn");
       return;
     }
     if (sorted.length === 1 && !isSupportedMedia(sorted[0]!)) {
-      setMessage("只支持视频、GIF、单张图片或 PNG/JPG/WebP/BMP 序列。", "warn");
+      setMessage("请导入视频、GIF、图片或图片序列。", "warn");
       return;
     }
     await runBusy("upload", async () => {
@@ -624,7 +624,7 @@ export default function SpriteVideoLab() {
 
   async function previewFrame() {
     if (!upload) {
-      setMessage("先导入素材，再预览参数。", "warn");
+      setMessage("先导入素材。", "warn");
       return;
     }
     const sampleTime =
@@ -632,23 +632,23 @@ export default function SpriteVideoLab() {
         ? clamp(videoRef.current?.currentTime || frameToTime(upload, startFrame, "start"), frameToTime(upload, startFrame, "start"), frameToTime(upload, endFrame, "end"))
         : 0;
     await runBusy("preview", async () => {
-      setMessage("正在生成单帧参数预览...");
+      setMessage("正在预览单帧...");
       const data = await spriteApi<{ ok: true; preview: SpritePreview }>("/preview-frame", {
         method: "POST",
         body: payload({ sample_time: sampleTime, sample_frame: startFrame }),
       });
       setPreview(data.preview);
-      setMessage("单帧预览已更新。", "success");
+      setMessage("预览已更新。", "success");
     });
   }
 
   async function processSource() {
     if (!upload) {
-      setMessage("先导入素材，再开始处理。", "warn");
+      setMessage("先导入素材。", "warn");
       return;
     }
     await runBusy("process", async () => {
-      setMessage("正在处理区间并生成透明帧...");
+      setMessage("正在生成透明帧...");
       const data = await spriteApi<{ ok: true; job: SpriteJob }>("/process", {
         method: "POST",
         body: payload(),
@@ -659,14 +659,14 @@ export default function SpriteVideoLab() {
       setCurrentPreviewIndex(0);
       setExportResult(null);
       setMagic(null);
-      setMessage(`处理完成，共 ${data.job.frame_count} 帧。`, "success");
+      setMessage(`已生成 ${data.job.frame_count} 帧。`, "success");
     });
   }
 
   async function importAnimation(files: File[]) {
     const images = sortFiles(files).filter(isSupportedImage);
     if (!images.length) {
-      setMessage("请选择 PNG / JPG / WebP / BMP 序列帧。", "warn");
+      setMessage("请选择图片序列。", "warn");
       return;
     }
     await runBusy("import-animation", async () => {
@@ -688,7 +688,7 @@ export default function SpriteVideoLab() {
 
   async function postprocessPreview(kind: PreviewPostprocessKind) {
     if (!activePreview?.preview_id) {
-      setMessage("先生成单帧预览，再做后处理。", "warn");
+      setMessage("先预览一帧。", "warn");
       return;
     }
     await runBusy(kind, async () => {
@@ -734,7 +734,7 @@ export default function SpriteVideoLab() {
 
   async function exportFrames() {
     if (!job || selectedForPreview.length === 0) {
-      setMessage("至少选择一帧再导出。", "warn");
+      setMessage("至少选择一帧。", "warn");
       return;
     }
     await runBusy("export", async () => {
@@ -747,17 +747,17 @@ export default function SpriteVideoLab() {
         },
       });
       setExportResult(data.export);
-      setMessage("导出完成，已生成 frames、WebM、MOV 和 GIF。", "success");
+      setMessage("导出完成。", "success");
     });
   }
 
   async function runMagic() {
     if (!job || selectedForPreview.length === 0) {
-      setMessage("至少选择一帧再运行 MAGIC。", "warn");
+      setMessage("至少选择一帧。", "warn");
       return;
     }
     await runBusy("magic", async () => {
-      setMessage("MAGIC 正在运行 Real-ESRGAN anime 并生成 1/2、1/4、1/8 三档...");
+      setMessage("正在生成 MAGIC 版本...");
       const data = await spriteApi<{ ok: true; magic: SpriteMagic }>("/magic-preview", {
         method: "POST",
         body: {
@@ -917,7 +917,7 @@ export default function SpriteVideoLab() {
   async function loadLineFiles(files: File[]) {
     const images = sortFiles(files).filter(isSupportedImage);
     if (!images.length) {
-      setMessage("请导入 PNG / JPG / WebP / BMP 序列帧。", "warn");
+      setMessage("请导入图片序列。", "warn");
       return;
     }
     await runBusy("line-load", async () => {
@@ -948,7 +948,7 @@ export default function SpriteVideoLab() {
 
   async function processLineCleaner() {
     if (!lineFrames.length) {
-      setMessage("先导入序列帧。", "warn");
+      setMessage("先导入图片序列。", "warn");
       return;
     }
     await runBusy("line-process", async () => {
@@ -959,7 +959,7 @@ export default function SpriteVideoLab() {
       form.append("alpha_cutoff", String(lineAlphaCutoff));
       form.append("sharpen_percent", String(lineSharpen));
       form.append("color_count", String(lineColorCount));
-      setMessage("正在处理线稿序列...");
+      setMessage("正在处理序列...");
       const data = await spriteApi<{
         ok: true;
         result: { frames: Array<{ index: number; url: string; width: number; height: number; bytes: number }> };
@@ -976,7 +976,7 @@ export default function SpriteVideoLab() {
       }
       setLineFrames(next);
       setLinePlaying(true);
-      setMessage("线稿清理处理完成。", "success");
+      setMessage("处理完成。", "success");
     });
   }
 
@@ -1011,7 +1011,7 @@ export default function SpriteVideoLab() {
             <Link href="/" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.07] text-white/70 transition hover:bg-white/[0.13] hover:text-white">
               <ArrowLeft className="h-4 w-4" />
             </Link>
-            <h1 className="text-base font-semibold tracking-wide text-white/90 shrink-0">Sprite 资产处理台</h1>
+            <h1 className="text-base font-semibold tracking-wide text-white/90 shrink-0">Sprite 处理</h1>
             <div className="flex min-w-0 items-center gap-2 text-xs">
               <span className={`h-2 w-2 shrink-0 rounded-full ${tone === "error" ? "bg-red-400" : tone === "warn" ? "bg-amber-300" : tone === "success" ? "bg-emerald-300" : "bg-sky-300"}`} />
               <span className="truncate text-white/50">{status}</span>
@@ -1021,13 +1021,13 @@ export default function SpriteVideoLab() {
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="secondary" onClick={() => setMode((current) => current === "sprite" ? "line-cleaner" : "sprite")}>
               {mode === "sprite" ? <Eraser className="h-3.5 w-3.5" /> : <Film className="h-3.5 w-3.5" />}
-              {mode === "sprite" ? "线稿清理" : "返回 Sprite 处理"}
+              {mode === "sprite" ? "清理线稿" : "返回 Sprite"}
             </Button>
           </div>
         </header>
 
         {mode === "sprite" ? (
-          <div className="grid min-h-0 flex-1 grid-cols-[390px_390px_minmax(0,1fr)] gap-4 overflow-hidden px-4 pb-6">
+          <div className="grid min-h-0 flex-1 grid-cols-[390px_390px_minmax(0,1fr)] gap-4 overflow-hidden px-4 pb-4">
             <aside className="min-h-0 space-y-4 overflow-y-auto pr-1 no-scrollbar">
               <SourcePanel upload={upload} uploadFiles={uploadFiles} videoRef={videoRef} mediaUrl={mediaUrl} />
               {upload && (
@@ -1044,8 +1044,8 @@ export default function SpriteVideoLab() {
 
             <section className="h-full min-h-0 overflow-y-auto pr-1 no-scrollbar">
               <Panel
-                title="参数预览"
-                className="min-h-full"
+                title="单帧预览"
+                className="max-h-[calc(100vh-88px)] min-h-full overflow-y-auto no-scrollbar"
                 action={
                   <button
                     type="button"
@@ -1054,28 +1054,28 @@ export default function SpriteVideoLab() {
                     className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-200/80 transition hover:text-sky-100 disabled:opacity-40"
                   >
                     {busy === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    预览当前帧
+                    预览一帧
                   </button>
                 }
               >
                 <div className="space-y-3">
                   <div className="grid gap-2">
-                    <PreviewImage title="原始抽帧" url={activePreview?.source_url} compact />
-                    <PreviewImage title="参数结果" url={activePreview?.processed_url} bgMode={previewBgMode} bgColor={previewBg} compact />
+                    <PreviewImage title="原图" url={activePreview?.source_url} compact />
+                    <PreviewImage title="处理后" url={activePreview?.processed_url} bgMode={previewBgMode} bgColor={previewBg} compact />
                   </div>
                   <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2">
-                    <SectionLabel>显示</SectionLabel>
-                    <Field label="结果背景">
+                    <SectionLabel>背景</SectionLabel>
+                    <Field label="显示方式">
                       <Select value={previewBgMode} onChange={(event) => setPreviewBgMode(event.target.value as "checkerboard" | "color")}>
-                        <option value="checkerboard">棋盘格</option>
+                        <option value="checkerboard">透明格</option>
                         <option value="color">纯色</option>
                       </Select>
                     </Field>
-                    <Field label="背景色">
+                    <Field label="预览颜色">
                       <ColorField value={previewBg} onChange={(value) => setPreviewBg(value)} />
                     </Field>
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-white/8 bg-black/15 px-3 py-2 text-xs">
-                      <span className="text-white/40">检测背景色</span>
+                      <span className="text-white/40">自动取色</span>
                       {activePreview?.key_color ? (
                         <span className="inline-flex items-center gap-2 text-white/72">
                           <span className="h-4 w-4 rounded border border-white/15" style={{ backgroundColor: activePreview.key_color }} />
@@ -1087,7 +1087,7 @@ export default function SpriteVideoLab() {
                     </div>
                   </section>
                   <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2">
-                    <SectionLabel>预览后处理</SectionLabel>
+                    <SectionLabel>单帧修正</SectionLabel>
                     <div className="grid grid-cols-2 gap-2">
                       {PREVIEW_POSTPROCESS_KINDS.map((kind) => {
                         const changed = previewPostprocessChanged(activePreview, kind);
@@ -1113,11 +1113,11 @@ export default function SpriteVideoLab() {
                       })}
                     </div>
                     <p className="text-[11px] leading-4 text-white/35">
-                      这里只影响当前单帧预览；最终批量处理请用左侧「批处理」开关。
+                      只影响当前预览；批量处理请用左侧开关。
                     </p>
                     <Button disabled={!activePreview?.processed_url} onClick={() => activePreview?.processed_url && downloadUrl(activePreview.processed_url, "sprite-preview.png")} className="w-full">
                       <Download className="h-3.5 w-3.5" />
-                      下载预览
+                      下载当前帧
                     </Button>
                   </section>
                 </div>
@@ -1126,14 +1126,14 @@ export default function SpriteVideoLab() {
 
             <section className="h-full min-h-0 overflow-y-auto pr-1 no-scrollbar">
               <Panel
-                title="创作处理"
-                className="relative min-h-full"
+                title="批量生成"
+                className="relative max-h-[calc(100vh-88px)] min-h-full overflow-y-auto no-scrollbar"
               >
                 <div className="absolute right-4 top-[18px] z-10 flex flex-wrap items-center justify-end gap-2">
-                  <FileButton onFiles={importAnimation} multiple label="导入帧序列" icon={<ImagePlus className="h-3.5 w-3.5" />} accent />
+                  <FileButton onFiles={importAnimation} multiple label="导入帧" icon={<ImagePlus className="h-3.5 w-3.5" />} accent />
                   <Button disabled={!upload || busy === "process"} onClick={processSource} variant="primary">
                     {busy === "process" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                    开始处理区间
+                    开始处理
                   </Button>
                 </div>
                 <div className="space-y-4">
@@ -1141,7 +1141,7 @@ export default function SpriteVideoLab() {
                     <div className="min-w-0 space-y-2">
                       <div className="relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]" style={{ backgroundColor: animationBg }}>
                         <canvas ref={animationCanvasRef} width={512} height={512} className="h-full w-full" />
-                        {!selectedForPreview.length && <EmptyStage label="开始处理区间后显示结果" />}
+                        {!selectedForPreview.length && <EmptyStage label="处理后显示" />}
                         <div className="absolute left-2 top-2 z-10 inline-flex h-7 items-center rounded-xl border border-white/15 bg-black/45 px-2.5 text-[11px] font-medium text-white/90 shadow-md shadow-black/25 backdrop-blur-2xl">
                           当前 {selectedForPreview.length ? `${currentPreviewIndex + 1} / ${selectedForPreview.length}` : "0 / 0"}
                         </div>
@@ -1171,29 +1171,29 @@ export default function SpriteVideoLab() {
                       <div className="flex max-w-full flex-col items-start gap-2">
                         <div className="flex max-w-full flex-col items-start gap-3 px-1">
                           <div className="w-full max-w-44">
-                            <Field label="背景">
+                            <Field label="预览底色">
                               <ColorField value={animationBg} onChange={(value) => setAnimationBg(value)} />
                             </Field>
                           </div>
                           <div className="w-full max-w-44">
-                            <Field label="间隔 ms">
+                            <Field label="播放间隔">
                               <TextInput type="number" min={20} max={5000} value={intervalMs} onChange={(event) => setIntervalMs(clamp(Number(event.target.value || 100), 20, 5000))} />
                             </Field>
                           </div>
                         </div>
                         <div className="grid max-w-full gap-1.5 px-1 text-xs text-white/58">
-                          <span>选择</span>
+                          <span>选帧</span>
                           <div className="flex max-w-full flex-wrap items-center gap-2">
                             <ToolPill disabled={!job} active={selectState === "all"} onClick={() => selectBy(() => true)}>全选</ToolPill>
-                            <ToolPill disabled={!job} active={selectState === "none"} onClick={() => selectBy(() => false)}>全不选</ToolPill>
+                            <ToolPill disabled={!job} active={selectState === "none"} onClick={() => selectBy(() => false)}>清空</ToolPill>
                             <ToolPill disabled={!job} onClick={() => job && selectBy((frame) => !selected.has(frame.index))}>反选</ToolPill>
                             <ToolPill disabled={!job} active={selectState === "odd"} onClick={() => selectBy((frame) => (frame.index + 1) % 2 === 1)}>奇数帧</ToolPill>
                             <ToolPill disabled={!job} active={selectState === "even"} onClick={() => selectBy((frame) => (frame.index + 1) % 2 === 0)}>偶数帧</ToolPill>
-                            <ToolPill disabled={!job} active={orderedSelection} onClick={() => setOrderedSelection((value) => !value)}>按选序</ToolPill>
+                            <ToolPill disabled={!job} active={orderedSelection} onClick={() => setOrderedSelection((value) => !value)}>按点击顺序</ToolPill>
                           </div>
                         </div>
                         <div className="grid max-w-full gap-1.5 px-1 text-xs text-white/58">
-                          <span>顺序</span>
+                          <span>播放顺序</span>
                           <label className="flex h-9 w-full max-w-44 cursor-pointer items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.07] px-3 text-xs text-white/70 transition hover:bg-white/[0.1] hover:text-white">
                             <span className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded-[6px] border transition ${reverse ? "border-white/40 bg-white" : "border-white/25 bg-white/[0.04]"}`}>
                               {reverse && (
@@ -1208,19 +1208,19 @@ export default function SpriteVideoLab() {
                               onChange={(event) => setReverse(event.target.checked)}
                               className="sr-only"
                             />
-                            <span>反向动画预览和导出</span>
+                            <span>倒序预览和导出</span>
                           </label>
                         </div>
                       </div>
                       <div className="flex w-fit max-w-full flex-wrap items-center gap-2 px-1">
                         <SurfaceActionButton disabled={!job?.processed_dir} onClick={() => openPath(job?.processed_dir)}>
                           <FolderOpen className="h-3.5 w-3.5" />
-                          处理目录
+                          打开目录
                         </SurfaceActionButton>
                         <SurfaceActionButton active={magicResizeMode === "hard"} onClick={() => setMagicResizeMode("hard")}>硬</SurfaceActionButton>
                         <SurfaceActionButton active={magicResizeMode === "soft"} onClick={() => setMagicResizeMode("soft")}>软</SurfaceActionButton>
                         <SurfaceActionButton disabled={!job || !selectedForPreview.length || busy === "magic"} onClick={runMagic}>MAGIC</SurfaceActionButton>
-                        <SurfaceActionButton disabled={!job || !selectedForPreview.length || busy === "export"} onClick={exportFrames} accent>导出选中帧</SurfaceActionButton>
+                        <SurfaceActionButton disabled={!job || !selectedForPreview.length || busy === "export"} onClick={exportFrames} accent>导出</SurfaceActionButton>
                       </div>
                     </div>
                   </div>
@@ -1298,9 +1298,9 @@ function SourcePanel({
     : info.fps ? `${Number(info.fps).toFixed(2)} fps` : "-";
   const durationLabel = info.duration
     ? formatSeconds(info.duration)
-    : mediaType(upload) === "image" ? "单张图片" : "-";
+    : mediaType(upload) === "image" ? "图片" : "-";
   return (
-    <Panel title="导入源素材">
+    <Panel title="导入素材">
       <label
         onDragOver={(event) => event.preventDefault()}
         onDrop={onDrop}
@@ -1310,8 +1310,8 @@ function SourcePanel({
           <Upload className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-white/85">拖入或点击选择文件</p>
-          <p className="truncate text-[11px] leading-4 text-white/35">视频 / GIF / 图片 / 序列帧</p>
+          <p className="text-xs font-medium text-white/85">拖入文件或点击选择</p>
+          <p className="truncate text-[11px] leading-4 text-white/35">视频、GIF、图片序列</p>
         </div>
         <input
           type="file"
@@ -1326,14 +1326,14 @@ function SourcePanel({
           {mediaType(upload) === "video" ? (
             <video ref={videoRef} src={mediaUrl} muted playsInline loop controls className="h-full w-full object-contain" />
           ) : (
-            <img src={mediaUrl} alt="源素材预览" className="h-full w-full object-contain" />
+            <img src={mediaUrl} alt="素材预览" className="h-full w-full object-contain" />
           )}
         </div>
       )}
       {hasUpload ? (
         <dl className="mt-3 space-y-1.5 text-xs">
           {[
-            ["素材", upload?.display_name || "-"],
+            ["文件", upload?.display_name || "-"],
             ["类型", mediaType(upload)],
             ["尺寸", info.width && info.height ? `${info.width} × ${info.height}` : "-"],
             ["帧率", fpsLabel],
@@ -1347,7 +1347,7 @@ function SourcePanel({
         </dl>
       ) : (
         <p className="mt-2.5 text-[11px] leading-4 text-white/28">
-          支持 MP4 / MOV / MKV / WebM / GIF / PNG / JPG / WebP / BMP，多图按文件名组成序列
+          支持视频、GIF、图片；多张图片会按文件名排序。
         </p>
       )}
     </Panel>
@@ -1478,8 +1478,8 @@ function TimelinePanel({
 
   if (mediaType(upload) === "image") {
     return (
-      <Panel title="截取区间">
-        <p className="text-sm text-white/58">单张图片模式，无需调整区间。</p>
+      <Panel title="处理范围">
+        <p className="text-sm text-white/58">图片不需要选范围。</p>
       </Panel>
     );
   }
@@ -1490,10 +1490,10 @@ function TimelinePanel({
   const endTime = isVideo ? frameToTime(upload, endFrame, "end") : 0;
 
   return (
-    <Panel title="截取区间">
+    <Panel title="处理范围">
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="起始帧">
+          <Field label="开始帧">
             <TextInput type="number" min={1} max={count} value={startFrame} onChange={(event) => setStartFrame(Number(event.target.value))} />
           </Field>
           <Field label="结束帧">
@@ -1546,34 +1546,34 @@ function OptionsPanel({
   const isSlowMatte =
     options.matteMode.includes("birefnet") || options.matteMode.includes("corridorkey");
   return (
-    <Panel title="处理参数">
+    <Panel title="处理参数" className="max-h-[calc(100vh-88px)] overflow-y-auto no-scrollbar">
       <div className="space-y-3">
         <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2.5">
           <SectionLabel>输出</SectionLabel>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="保留每 N 帧">
+            <Field label="抽帧间隔">
               <TextInput type="number" min={1} value={options.keepEvery} onChange={(event) => patch({ keepEvery: Math.max(1, Number(event.target.value || 1)) })} />
             </Field>
-            <Field label="输出尺寸 %">
+            <Field label="缩放比例">
               <TextInput type="number" min={5} max={200} step={5} value={options.outputScale} onChange={(event) => patch({ outputScale: clamp(Number(event.target.value || 100), 5, 200) })} />
             </Field>
-            <Field label="画布布局">
+            <Field label="画布">
               <Select value={options.canvasMode} onChange={(event) => patch({ canvasMode: event.target.value as ProcessingOptions["canvasMode"] })}>
-                <option value="auto">自动宽度，居中</option>
-                <option value="square_bottom">方形画布，底部对齐</option>
-                <option value="square_center">方形画布，居中</option>
+                <option value="auto">自适应居中</option>
+                <option value="square_bottom">方形底部</option>
+                <option value="square_center">方形居中</option>
               </Select>
             </Field>
-            <Field label="画布边距">
+            <Field label="缩边">
               <TextInput type="number" min={0} value={options.reducePx} onChange={(event) => patch({ reducePx: Math.max(0, Number(event.target.value || 0)) })} />
             </Field>
           </div>
         </section>
 
         <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2.5">
-          <SectionLabel>抠图</SectionLabel>
-          <Check checked={options.chromaEnabled} onChange={(checked) => patch({ chromaEnabled: checked })} label="启用抠背景并输出透明 PNG" />
-          <Field label="算法">
+          <SectionLabel>去背景</SectionLabel>
+          <Check checked={options.chromaEnabled} onChange={(checked) => patch({ chromaEnabled: checked })} label="输出透明背景" />
+          <Field label="方式">
             <Select value={options.matteMode} disabled={!options.chromaEnabled} onChange={(event) => patch({ matteMode: event.target.value as ProcessingOptions["matteMode"] })}>
               {MATTE_MODES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </Select>
@@ -1582,20 +1582,20 @@ function OptionsPanel({
             </span>
             {isSlowMatte && (
               <span className="text-[11px] leading-4 text-amber-200/70">
-                慢速模式会加载 AI/CorridorKey 模型，首次预览可能很久；批量处理前建议先单帧确认。
+                慢速模式首次会久一点，建议先预览一帧。
               </span>
             )}
           </Field>
           {(isChroma || isCorridor) && (
             <div className="grid grid-cols-2 gap-2">
-              <Field label="取色方式">
+              <Field label="背景取色">
                 <Select value={options.keyMode} onChange={(event) => patch({ keyMode: event.target.value as "auto" | "manual" })}>
-                  <option value="auto">自动取背景色</option>
-                  <option value="manual">手动指定颜色</option>
+                  <option value="auto">自动</option>
+                  <option value="manual">手动</option>
                 </Select>
               </Field>
               <Field
-                label={options.keyMode === "auto" ? "检测背景色" : "背景色"}
+                label={options.keyMode === "auto" ? "自动背景色" : "背景色"}
                 hint={undefined}
               >
                 {options.keyMode === "auto" ? (
@@ -1613,18 +1613,18 @@ function OptionsPanel({
                   <ColorField value={options.manualKeyHex} onChange={(value) => patch({ manualKeyHex: value })} />
                 )}
               </Field>
-              <Field label="阈值"><TextInput type="number" value={options.threshold} onChange={(event) => patch({ threshold: Number(event.target.value || 0) })} /></Field>
-              <Field label="边缘柔化"><TextInput type="number" value={options.softness} onChange={(event) => patch({ softness: Number(event.target.value || 0) })} /></Field>
+              <Field label="去除强度"><TextInput type="number" value={options.threshold} onChange={(event) => patch({ threshold: Number(event.target.value || 0) })} /></Field>
+              <Field label="边缘柔和"><TextInput type="number" value={options.softness} onChange={(event) => patch({ softness: Number(event.target.value || 0) })} /></Field>
             </div>
           )}
           {options.chromaEnabled && (
             <div className="grid grid-cols-2 gap-2">
-              <Field label="去溢色"><TextInput type="number" min={0} max={1} step={0.05} value={options.despillStrength} onChange={(event) => patch({ despillStrength: Number(event.target.value || 0) })} /></Field>
-              <Field label="Halo 收边"><TextInput type="number" min={0} value={options.haloPixels} onChange={(event) => patch({ haloPixels: Number(event.target.value || 0) })} /></Field>
+              <Field label="去绿边"><TextInput type="number" min={0} max={1} step={0.05} value={options.despillStrength} onChange={(event) => patch({ despillStrength: Number(event.target.value || 0) })} /></Field>
+              <Field label="收边"><TextInput type="number" min={0} value={options.haloPixels} onChange={(event) => patch({ haloPixels: Number(event.target.value || 0) })} /></Field>
             </div>
           )}
           {isCorridor && (
-            <Field label="CorridorKey 幕布颜色">
+            <Field label="幕布颜色">
               <Select value={options.corridorkeyScreen} onChange={(event) => patch({ corridorkeyScreen: event.target.value as "auto" | "green" | "blue" })}>
                 <option value="auto">自动</option>
                 <option value="green">绿色</option>
@@ -1634,8 +1634,8 @@ function OptionsPanel({
           )}
           {isLuma && (
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Luma 黑场"><TextInput type="number" value={options.lumaBlack} onChange={(event) => patch({ lumaBlack: Number(event.target.value || 0) })} /></Field>
-              <Field label="Luma 白场"><TextInput type="number" value={options.lumaWhite} onChange={(event) => patch({ lumaWhite: Number(event.target.value || 0) })} /></Field>
+              <Field label="暗部"><TextInput type="number" value={options.lumaBlack} onChange={(event) => patch({ lumaBlack: Number(event.target.value || 0) })} /></Field>
+              <Field label="亮部"><TextInput type="number" value={options.lumaWhite} onChange={(event) => patch({ lumaWhite: Number(event.target.value || 0) })} /></Field>
               <Field label="Gamma"><TextInput type="number" step={0.05} value={options.lumaGamma} onChange={(event) => patch({ lumaGamma: Number(event.target.value || 1) })} /></Field>
               <Field label="强度"><TextInput type="number" step={0.05} value={options.lumaStrength} onChange={(event) => patch({ lumaStrength: Number(event.target.value || 1) })} /></Field>
             </div>
@@ -1644,16 +1644,16 @@ function OptionsPanel({
 
         {isChroma && (
           <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2.5">
-            <SectionLabel>前景保护</SectionLabel>
-            <Check checked={options.foregroundProtectEnabled} onChange={(checked) => patch({ foregroundProtectEnabled: checked })} label="保护前景近似颜色" />
+            <SectionLabel>保护主体</SectionLabel>
+            <Check checked={options.foregroundProtectEnabled} onChange={(checked) => patch({ foregroundProtectEnabled: checked })} label="保护相近颜色" />
             <div className="grid grid-cols-2 gap-2">
-              <Field label="前景色">
+              <Field label="保护色">
                 <ColorField value={options.foregroundProtectHex} disabled={!options.foregroundProtectEnabled} onChange={(value) => patch({ foregroundProtectHex: value })} />
               </Field>
-              <Field label="保护容差">
+              <Field label="范围">
                 <TextInput type="number" min={1} max={120} value={options.foregroundProtectTolerance} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectTolerance: clamp(Number(event.target.value || 34), 1, 120) })} />
               </Field>
-              <Field label="保护强度">
+              <Field label="强度">
                 <TextInput type="number" min={0} max={1} step={0.05} value={options.foregroundProtectStrength} disabled={!options.foregroundProtectEnabled} onChange={(event) => patch({ foregroundProtectStrength: clamp(Number(event.target.value || 1), 0, 1) })} />
               </Field>
             </div>
@@ -1661,11 +1661,11 @@ function OptionsPanel({
         )}
 
         <section className="rounded-xl border border-white/8 bg-white/[0.025] p-3 space-y-2">
-          <SectionLabel>批处理</SectionLabel>
-          <Check checked={options.batchGreenToBlack} onChange={(checked) => patch({ batchGreenToBlack: checked })} label="绿色残边转黑" />
-          <Check checked={options.batchGreenDesaturate} onChange={(checked) => patch({ batchGreenDesaturate: checked })} label="绿色残边饱和度归零" />
-          <Check checked={options.batchSemiTransparentToBlack} onChange={(checked) => patch({ batchSemiTransparentToBlack: checked })} label="半透明像素转黑" />
-          <Check checked={options.batchSemiTransparentToOpaque} onChange={(checked) => patch({ batchSemiTransparentToOpaque: checked })} label="半透明像素转不透明" />
+          <SectionLabel>批量修正</SectionLabel>
+          <Check checked={options.batchGreenToBlack} onChange={(checked) => patch({ batchGreenToBlack: checked })} label="绿边变暗" />
+          <Check checked={options.batchGreenDesaturate} onChange={(checked) => patch({ batchGreenDesaturate: checked })} label="淡化绿边" />
+          <Check checked={options.batchSemiTransparentToBlack} onChange={(checked) => patch({ batchSemiTransparentToBlack: checked })} label="半透明变暗" />
+          <Check checked={options.batchSemiTransparentToOpaque} onChange={(checked) => patch({ batchSemiTransparentToOpaque: checked })} label="补实半透明" />
         </section>
       </div>
     </Panel>
@@ -1719,7 +1719,7 @@ function PreviewImage({
         className={`flex ${compact ? "h-[210px] 2xl:h-[250px]" : "aspect-[4/3]"} items-center justify-center overflow-hidden rounded-lg border border-white/10 ${previewBgClass}`}
         style={previewStyle}
       >
-        {imageUrl ? <img src={imageUrl} alt={title} className="h-full w-full object-contain" /> : <span className="text-xs text-white/28">等待预览</span>}
+        {imageUrl ? <img src={imageUrl} alt={title} className="h-full w-full object-contain" /> : <span className="text-xs text-white/28">暂无预览</span>}
       </div>
       {open && imageUrl &&
         createPortal(
@@ -1769,7 +1769,12 @@ function FrameGrid({
   toggleFrame: (index: number, checked: boolean) => void;
 }) {
   if (!job) {
-    return <div className="flex min-h-64 items-center justify-center rounded-lg border border-white/10 bg-white/[0.035] text-sm text-white/32">处理后帧会显示在这里</div>;
+    return (
+      <div className="flex min-h-[520px] flex-col items-center justify-center gap-3">
+        <img src="/sprite-video-lab/empty-frames.svg" alt="" className="h-[200px] w-[200px] object-contain opacity-70" />
+        <p className="text-xs text-white/32">处理后会在这里显示帧序列</p>
+      </div>
+    );
   }
   const orderMap = new Map(order.map((index, idx) => [index, idx + 1]));
   return (
@@ -1835,7 +1840,7 @@ function ExportPanel({ result, openPath }: { result: SpriteExport | null; openPa
   return (
     <div className="rounded-lg border border-emerald-300/15 bg-emerald-300/[0.055] p-3">
       <div className="mb-3 flex items-center justify-between">
-        <strong className="text-sm text-emerald-100">导出结果</strong>
+        <strong className="text-sm text-emerald-100">导出完成</strong>
         <span className="text-xs text-white/55">{result.frame_count || 0} 帧</span>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -1888,41 +1893,41 @@ function LineCleaner(props: {
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] gap-4 overflow-hidden p-4">
       <aside className="space-y-4 overflow-y-auto pr-1 no-scrollbar">
-        <Panel title="动画帧缩小清理实验" kicker="Line Cleaner">
+        <Panel title="线稿清理" kicker="Line Cleaner">
           <div className="space-y-3">
-            <FileDrop onFiles={props.loadFiles} label="拖入透明 PNG / JPG / WebP / BMP 序列帧" />
+            <FileDrop onFiles={props.loadFiles} label="拖入图片序列" />
             <div className="grid grid-cols-2 gap-2">
               <Meta label="帧数" value={String(props.frames.length)} />
-              <Meta label="原始体积" value={formatBytes(props.sourceBytes)} />
-              <Meta label="处理后体积" value={formatBytes(props.processedBytes)} />
+              <Meta label="原体积" value={formatBytes(props.sourceBytes)} />
+              <Meta label="新体积" value={formatBytes(props.processedBytes)} />
               <Meta label="节省" value={saving === null ? "-" : `${saving}%`} />
             </div>
           </div>
         </Panel>
-        <Panel title="处理参数" kicker="Controls">
+        <Panel title="清理设置" kicker="Controls">
           <div className="space-y-3">
-            <Field label="播放 FPS"><TextInput type="number" min={1} max={60} value={props.fps} onChange={(event) => props.setFps(clamp(Number(event.target.value || 12), 1, 60))} /></Field>
-            <Field label="处理路线">
+            <Field label="播放帧率"><TextInput type="number" min={1} max={60} value={props.fps} onChange={(event) => props.setFps(clamp(Number(event.target.value || 12), 1, 60))} /></Field>
+            <Field label="处理方式">
               <Select value={props.method} onChange={(event) => props.setMethod(event.target.value as "classic" | "realesrgan_anime")}>
-                <option value="classic">普通缩小 / Lanczos</option>
+                <option value="classic">普通缩小</option>
                 <option value="realesrgan_anime">Real-ESRGAN anime 先整线再缩小</option>
               </Select>
             </Field>
-            <Field label="输出倍数"><TextInput type="number" min={0.05} max={2} step={0.05} value={props.scale} onChange={(event) => props.setScale(clamp(Number(event.target.value || 0.5), 0.05, 2))} /></Field>
+            <Field label="缩放倍数"><TextInput type="number" min={0.05} max={2} step={0.05} value={props.scale} onChange={(event) => props.setScale(clamp(Number(event.target.value || 0.5), 0.05, 2))} /></Field>
             <Field label={`透明清理 ${props.alphaCutoff}`}><input type="range" min={0} max={80} value={props.alphaCutoff} onChange={(event) => props.setAlphaCutoff(Number(event.target.value))} className="accent-sky-300" /></Field>
             <Field label={`缩小后锐化 ${props.sharpen}%`}><input type="range" min={0} max={220} step={5} value={props.sharpen} onChange={(event) => props.setSharpen(Number(event.target.value))} className="accent-sky-300" /></Field>
             <Field label={`最大颜色数 ${props.colorCount}`}><input type="range" min={16} max={256} step={8} value={props.colorCount} onChange={(event) => props.setColorCount(Number(event.target.value))} className="accent-sky-300" /></Field>
             <div className="flex flex-wrap gap-2">
-              <Button disabled={!props.frames.length || props.busy === "line-process"} onClick={props.processFrames} variant="primary">生成对比</Button>
+              <Button disabled={!props.frames.length || props.busy === "line-process"} onClick={props.processFrames} variant="primary">开始清理</Button>
               <Button disabled={!props.processedCount} onClick={() => props.current?.processedUrl && downloadUrl(props.current.processedUrl, "line-cleaned-frame.png")}>下载当前帧</Button>
-              <Button disabled={!props.processedCount} onClick={props.downloadTar}>下载 TAR</Button>
+              <Button disabled={!props.processedCount} onClick={props.downloadTar}>下载序列</Button>
             </div>
           </div>
         </Panel>
       </aside>
       <section className="min-h-0 overflow-y-auto pr-1 no-scrollbar">
         <Panel
-          title="同步动画对比"
+          title="动画对比"
           kicker="Viewer"
           action={
             <div className="flex gap-2">
@@ -1939,11 +1944,11 @@ function LineCleaner(props: {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <figure className="min-h-0">
-              <figcaption className="mb-2 text-xs text-white/52">原动画</figcaption>
+              <figcaption className="mb-2 text-xs text-white/52">原图</figcaption>
               <canvas ref={props.sourceCanvasRef} className="aspect-square w-full rounded-lg border border-white/10 bg-black/35" />
             </figure>
             <figure>
-              <figcaption className="mb-2 text-xs text-white/52">处理后动画</figcaption>
+              <figcaption className="mb-2 text-xs text-white/52">处理后</figcaption>
               <canvas ref={props.processedCanvasRef} className="aspect-square w-full rounded-lg border border-white/10 bg-black/35" />
             </figure>
           </div>
