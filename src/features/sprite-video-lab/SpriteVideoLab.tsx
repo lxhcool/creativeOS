@@ -41,6 +41,7 @@ import {
   spriteApi,
   spriteAssetUrl,
 } from "./api";
+import { DEFAULT_SPRITE_PROCESSING_OPTIONS } from "./defaults";
 import type {
   MagicVariant,
   ProcessingOptions,
@@ -68,34 +69,6 @@ type LineFrame = {
   processedBytes: number;
   processedWidth: number;
   processedHeight: number;
-};
-
-const DEFAULT_OPTIONS: ProcessingOptions = {
-  keepEvery: 2,
-  outputScale: 100,
-  canvasMode: "auto",
-  reducePx: 0,
-  chromaEnabled: true,
-  matteMode: "chroma",
-  keyMode: "auto",
-  manualKeyHex: "#00ff00",
-  threshold: 42,
-  softness: 8,
-  despillStrength: 0.6,
-  haloPixels: 1,
-  foregroundProtectEnabled: false,
-  foregroundProtectHex: "#2f8f3a",
-  foregroundProtectTolerance: 34,
-  foregroundProtectStrength: 1,
-  corridorkeyScreen: "auto",
-  lumaBlack: 0,
-  lumaWhite: 85,
-  lumaGamma: 0.55,
-  lumaStrength: 1.7,
-  batchGreenToBlack: false,
-  batchGreenDesaturate: false,
-  batchSemiTransparentToBlack: false,
-  batchSemiTransparentToOpaque: false,
 };
 
 const MATTE_MODES = [
@@ -465,7 +438,7 @@ export default function SpriteVideoLab() {
   const [tone, setTone] = useState<Tone>("idle");
   const [busy, setBusy] = useState("");
   const [upload, setUpload] = useState<SpriteUpload | null>(null);
-  const [options, setOptions] = useState<ProcessingOptions>(DEFAULT_OPTIONS);
+  const [options, setOptions] = useState<ProcessingOptions>(DEFAULT_SPRITE_PROCESSING_OPTIONS);
   const [startFrame, setStartFrame] = useState(1);
   const [endFrame, setEndFrame] = useState(1);
   const [preview, setPreview] = useState<SpritePreview | null>(null);

@@ -3,7 +3,18 @@ export type CanvasElementKind =
   | "shape"
   | "image"
   | "video"
-  | "audio";
+  | "audio"
+  | "template"
+  | "processor";
+
+export type CanvasArtifactType =
+  | "text"
+  | "image"
+  | "video"
+  | "audio"
+  | "sequence"
+  | "json"
+  | "asset_pack";
 
 export type CanvasGenerationStatus = "idle" | "generating" | "done" | "failed";
 
@@ -17,6 +28,7 @@ export interface CanvasElementBase {
   rotation: number;
   prompt?: string;
   modelRef?: string;
+  artifactId?: string;
   status?: CanvasGenerationStatus;
   error?: string;
 }
@@ -47,11 +59,29 @@ export interface CanvasMediaElement extends CanvasElementBase {
   src?: string;
 }
 
+export interface CanvasTemplateElement extends CanvasElementBase {
+  kind: "template";
+  templateId: string;
+  title?: string;
+  props?: Record<string, unknown>;
+}
+
+export interface CanvasProcessorElement extends CanvasElementBase {
+  kind: "processor";
+  processorId: string;
+  title: string;
+  sourceIds: string[];
+  resultIds?: string[];
+  config: Record<string, unknown>;
+}
+
 export type CanvasElement =
   | CanvasTextElement
   | CanvasShapeElement
   | CanvasImageElement
-  | CanvasMediaElement;
+  | CanvasMediaElement
+  | CanvasTemplateElement
+  | CanvasProcessorElement;
 
 export interface CanvasViewport {
   x: number;

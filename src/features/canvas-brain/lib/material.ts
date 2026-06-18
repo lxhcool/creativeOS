@@ -6,6 +6,12 @@ export function getElementMaterialText(element: CanvasElement): string {
   if (element.kind === "image" || element.kind === "video" || element.kind === "audio") {
     return (element.prompt || element.label || "").trim();
   }
+  if (element.kind === "template") {
+    return (element.prompt || element.title || element.templateId || "").trim();
+  }
+  if (element.kind === "processor") {
+    return (element.prompt || element.title || element.processorId || "").trim();
+  }
   return "";
 }
 
@@ -13,6 +19,12 @@ export function hasConcreteAsset(element: CanvasElement): boolean {
   if (element.kind === "text") return element.text.trim().length > 0;
   if (element.kind === "image" || element.kind === "video" || element.kind === "audio") {
     return Boolean(element.src);
+  }
+  if (element.kind === "template") {
+    return Boolean(element.artifactId || element.props || element.title);
+  }
+  if (element.kind === "processor") {
+    return Boolean(element.config || element.sourceIds.length > 0);
   }
   return true;
 }
@@ -67,6 +79,10 @@ export function toTextGenerationSource(element: CanvasElement): CanvasTextGenera
     label:
       element.kind === "image" || element.kind === "video" || element.kind === "audio"
         ? element.label
-        : undefined,
+        : element.kind === "template"
+          ? element.title
+          : element.kind === "processor"
+            ? element.title
+          : undefined,
   };
 }

@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from "child_process";
 import { createServer } from "net";
+import { join } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 const WORKER_HOST = "127.0.0.1";
-const WORKER_START_TIMEOUT_MS = 10_000;
+const WORKER_START_TIMEOUT_MS = 60_000;
 
 declare global {
   var __creativeOsSpriteWorkerProcess: ChildProcess | undefined;
@@ -34,9 +35,9 @@ function allocateWorkerPort(): Promise<number> {
 
 async function isWorkerReady(workerOrigin: string): Promise<boolean> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 600);
+  const timer = setTimeout(() => controller.abort(), 1_200);
   try {
-    const response = await fetch(`${workerOrigin}/api/runtime-info`, {
+    const response = await fetch(`${workerOrigin}/api/app-version`, {
       cache: "no-store",
       signal: controller.signal,
     });
@@ -59,11 +60,13 @@ async function waitForWorker(workerOrigin: string): Promise<void> {
 
 function spawnInternalWorker(port: number): ChildProcess {
   const python = process.env.CREATIVEOS_SPRITE_WORKER_PYTHON || "python3";
-  const serverPath = "tools/sprite-video-lab/server.py";
+  const projectRoot = process.cwd();
+  const serverPath = join(projectRoot, "tools/sprite-video-lab/server.py");
   const child = spawn(
     python,
     [serverPath, "--serve", "--host", WORKER_HOST, "--port", String(port)],
     {
+      cwd: projectRoot,
       env: process.env,
       stdio: "ignore",
       detached: false,
@@ -81,6 +84,15 @@ function spawnInternalWorker(port: number): ChildProcess {
   return child;
 }
 
+function stopInternalWorker(): void {
+  const existing = globalThis.__creativeOsSpriteWorkerProcess;
+  if (existing && existing.exitCode === null && !existing.killed) {
+    existing.kill();
+  }
+  globalThis.__creativeOsSpriteWorkerProcess = undefined;
+  globalThis.__creativeOsSpriteWorkerOrigin = undefined;
+}
+
 export async function getSpriteWorkerOrigin(): Promise<string> {
   const existingOrigin = globalThis.__creativeOsSpriteWorkerOrigin;
   if (existingOrigin && (await isWorkerReady(existingOrigin))) return existingOrigin;
@@ -90,10 +102,9 @@ export async function getSpriteWorkerOrigin(): Promise<string> {
       const port = await allocateWorkerPort();
       const workerOrigin = `http://${WORKER_HOST}:${port}`;
       globalThis.__creativeOsSpriteWorkerOrigin = workerOrigin;
-      const existing = globalThis.__creativeOsSpriteWorkerProcess;
-      if (!existing || existing.exitCode !== null || existing.killed) {
-        spawnInternalWorker(port);
-      }
+      stopInternalWorker();
+      globalThis.__creativeOsSpriteWorkerOrigin = workerOrigin;
+      spawnInternalWorker(port);
       await waitForWorker(workerOrigin);
       return workerOrigin;
     })().finally(() => {

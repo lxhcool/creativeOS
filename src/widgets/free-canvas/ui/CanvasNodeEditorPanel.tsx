@@ -43,7 +43,7 @@ export function CanvasNodeEditorPanel({
       onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
     >
-      <div className="min-h-[218px] bg-[radial-gradient(90%_90%_at_0%_0%,rgba(255,255,255,0.07),transparent_45%)] p-4">
+      <div className="min-h-[218px] overflow-hidden bg-[radial-gradient(90%_90%_at_0%_0%,rgba(255,255,255,0.07),transparent_45%)] p-4">
         <div className="flex items-start justify-between gap-3">
           <button
             type="button"

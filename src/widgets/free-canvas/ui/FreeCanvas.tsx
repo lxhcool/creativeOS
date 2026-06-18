@@ -24,6 +24,7 @@ import {
   isCanvasEdge,
   isCanvasElement,
 } from "@/entities/canvas/lib/factory";
+import { getCanvasActionsForElement } from "@/features/canvas-actions";
 import {
   executeCanvasBrainMediaGeneration,
   executeCanvasBrainTextNode,
@@ -66,10 +67,12 @@ import {
   getInputPortPosition,
   getOutputPortPosition,
   getTextNodeSize,
+  getViewportForElements,
   isPointInsideElement,
   useViewportSize,
 } from "../lib/geometry";
 import { useCanvasDocument } from "../lib/useCanvasDocument";
+import { useCanvasActionRunner } from "../lib/useCanvasActionRunner";
 import { useCanvasModelSelection } from "../lib/useCanvasModelSelection";
 import {
   darkPanel,
@@ -85,11 +88,13 @@ import {
   VIDEO_CONTROLS_HIDE_DELAY,
 } from "../model/constants";
 import { CanvasNodeEditorPanel } from "./CanvasNodeEditorPanel";
+import { CanvasProcessorNodeOverlay } from "./CanvasProcessorNodeOverlay";
 import {
   CanvasBrainPanel,
   type CanvasBrainChatMessage,
 } from "./CanvasBrainPanel";
 import { CanvasApiConfigModal } from "./CanvasApiConfigModal";
+import { CanvasNodeActionToolbar } from "./CanvasNodeActionToolbar";
 import { CanvasSideToolbar } from "./CanvasSideToolbar";
 import { CanvasTopToolbar } from "./CanvasTopToolbar";
 import type {
@@ -98,12 +103,15 @@ import type {
   CanvasElementKind,
   CanvasImageElement,
   CanvasMediaElement,
+  CanvasProcessorElement,
   CanvasProjectExport,
   CanvasShapeElement,
+  CanvasTemplateElement,
   CanvasTextElement,
   CanvasViewport,
 } from "@/entities/canvas/model/types";
 import type { CanvasDraftEdge } from "../model/types";
+import { renderCanvasTemplateContent } from "../templates/registry";
 
 type AiMessage = CanvasBrainChatMessage;
 
@@ -114,6 +122,9 @@ type CanvasExecutionOptions = {
   baseElements?: CanvasElement[];
   baseEdges?: CanvasEdge[];
 };
+
+const PROCESSOR_NODE_WIDTH = 880;
+const PROCESSOR_NODE_HEIGHT = 720;
 
 type CanvasNodeCommonProps = {
   id: string;
@@ -268,9 +279,18 @@ export function FreeCanvas() {
     selectedId !== null
       ? elements.find((element) => element.id === selectedId) || null
       : null;
+  const selectedElementActions = selectedElement
+    ? getCanvasActionsForElement(selectedElement)
+    : [];
   const selectedElementIsGenerating = selectedElement?.status === "generating";
   const selectedEditorFrame = selectedElement
     ? getCanvasNodeEditorFrame(selectedElement, viewport, size)
+    : null;
+  const selectedToolbarFrame = selectedElement
+    ? {
+        left: viewport.x + (selectedElement.x + selectedElement.width / 2) * viewport.scale,
+        top: Math.max(16, viewport.y + selectedElement.y * viewport.scale - 64),
+      }
     : null;
   const {
     brainModelOptions,
@@ -1219,6 +1239,11 @@ export function FreeCanvas() {
         commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
         setSelectedId(resultNode.id);
         appendAiMessage("assistant", "我已经准备好一个新的音频素材位置。");
+        return;
+      }
+
+      if (element.kind === "template") {
+        appendAiMessage("assistant", "模板节点会通过动作面板处理，暂不支持直接发送生成。");
       }
     },
     [
@@ -1234,6 +1259,42 @@ export function FreeCanvas() {
       setSelectedId,
     ],
   );
+
+  const { runAction, runProcessor } = useCanvasActionRunner({
+    elements,
+    edges,
+    commitCanvas,
+    patchElementDraft,
+    setSelectedId,
+    appendMessage: (content) => appendAiMessage("assistant", content),
+    onWorkflowCreated: (workflowElements) => {
+      const nextViewport = getViewportForElements(workflowElements, size, {
+        minScale: MIN_SCALE,
+        maxScale: 1,
+        padding: 96,
+      });
+      if (nextViewport) setViewport(nextViewport);
+    },
+  });
+
+  useEffect(() => {
+    elements.forEach((element) => {
+      if (element.kind !== "processor") return;
+      if (
+        element.width >= PROCESSOR_NODE_WIDTH &&
+        element.height >= PROCESSOR_NODE_HEIGHT
+      ) {
+        return;
+      }
+
+      patchElementDraft(element.id, {
+        x: element.x + element.width / 2 - PROCESSOR_NODE_WIDTH / 2,
+        y: element.y + element.height / 2 - PROCESSOR_NODE_HEIGHT / 2,
+        width: PROCESSOR_NODE_WIDTH,
+        height: PROCESSOR_NODE_HEIGHT,
+      } as Partial<CanvasElement>);
+    });
+  }, [elements, patchElementDraft]);
 
   const submitAiCommand = async () => {
     const command = chatInput.trim();
@@ -1438,7 +1499,33 @@ export function FreeCanvas() {
         </Layer>
       </Stage>
 
-      {selectedElement && selectedEditorFrame && (
+      {elements.map((element) =>
+        element.kind === "processor" ? (
+          <CanvasProcessorNodeOverlay
+            key={`processor_overlay_${element.id}`}
+            element={element}
+            viewport={viewport}
+            onSelect={() => {
+              setSelectedId(element.id);
+              setSelectedEdgeId(null);
+            }}
+            onMove={(updates) =>
+              patchElementDraft(element.id, updates as Partial<CanvasElement>)
+            }
+            onRun={(config) => void runProcessor(element, config)}
+          />
+        ) : null,
+      )}
+
+      {selectedElement && selectedToolbarFrame && (
+        <CanvasNodeActionToolbar
+          frame={selectedToolbarFrame}
+          actions={selectedElementActions}
+          onAction={(action) => void runAction(action, selectedElement)}
+        />
+      )}
+
+      {selectedElement && selectedElement.kind !== "processor" && selectedEditorFrame && (
         <CanvasNodeEditorPanel
           element={selectedElement}
           frame={selectedEditorFrame}
@@ -1895,6 +1982,18 @@ const canvasNodeRenderers: Record<
     <CanvasMediaNode
       {...props}
       element={props.element as CanvasMediaElement}
+    />
+  ),
+  template: (props) => (
+    <CanvasTemplateNode
+      {...props}
+      element={props.element as CanvasTemplateElement}
+    />
+  ),
+  processor: (props) => (
+    <CanvasProcessorNode
+      {...props}
+      element={props.element as CanvasProcessorElement}
     />
   ),
 };
@@ -2475,6 +2574,108 @@ function CanvasImageNode({
           onClick={() => onUploadImage(element)}
         />
       )}
+    </CanvasNodeShell>
+  );
+}
+
+function CanvasTemplateNode({
+  element,
+  selected,
+  dragging,
+  commonProps,
+}: CanvasNodeRendererProps<CanvasTemplateElement>) {
+  const content = renderCanvasTemplateContent(element);
+
+  return (
+    <CanvasNodeShell
+      commonProps={commonProps}
+      width={element.width}
+      height={element.height}
+      selected={selected}
+      dragging={dragging}
+    >
+      {content || (
+        <Text
+          x={NODE_PADDING}
+          y={element.height / 2 - 10}
+          width={Math.max(24, element.width - NODE_PADDING * 2)}
+          text={element.title || "未知模板"}
+          align="center"
+          fill="rgba(255,255,255,0.55)"
+          fontSize={14}
+          fontStyle="600"
+          listening={false}
+        />
+      )}
+    </CanvasNodeShell>
+  );
+}
+
+function CanvasProcessorNode({
+  element,
+  selected,
+  dragging,
+  commonProps,
+}: CanvasNodeRendererProps<CanvasProcessorElement>) {
+  const statusText =
+    element.status === "generating"
+      ? "处理中"
+      : element.status === "failed"
+        ? "处理失败"
+        : "可重新生成";
+  const keepEvery = Number(element.config.keepEvery || 2);
+  const matteMode = String(element.config.matteMode || "chroma");
+
+  return (
+    <CanvasNodeShell
+      commonProps={commonProps}
+      width={element.width}
+      height={element.height}
+      selected={selected}
+      dragging={dragging}
+    >
+      <Text
+        x={24}
+        y={28}
+        width={Math.max(24, element.width - 48)}
+        text={element.title}
+        fill="#f8fafc"
+        fontSize={18}
+        fontStyle="700"
+        listening={false}
+      />
+      <Text
+        x={24}
+        y={64}
+        width={Math.max(24, element.width - 48)}
+        text={`${statusText} · ${matteMode} · 每 ${keepEvery} 帧`}
+        fill={element.status === "failed" ? "#fecaca" : "rgba(255,255,255,0.58)"}
+        fontSize={13}
+        fontStyle="600"
+        listening={false}
+      />
+      <Rect
+        x={24}
+        y={112}
+        width={Math.max(24, element.width - 48)}
+        height={88}
+        fill="rgba(255,255,255,0.04)"
+        stroke="rgba(255,255,255,0.08)"
+        strokeWidth={1}
+        cornerRadius={8}
+        listening={false}
+      />
+      <Text
+        x={40}
+        y={142}
+        width={Math.max(24, element.width - 80)}
+        text={element.error || "选中节点可调整抠图参数并重新生成"}
+        align="center"
+        fill="rgba(255,255,255,0.42)"
+        fontSize={13}
+        fontStyle="600"
+        listening={false}
+      />
     </CanvasNodeShell>
   );
 }

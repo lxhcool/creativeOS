@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import type { CanvasElement } from "@/entities/canvas/model/types";
+import type {
+  CanvasElement,
+  CanvasViewport,
+} from "@/entities/canvas/model/types";
 import {
   DEFAULT_NODE_HEIGHT,
   DEFAULT_NODE_WIDTH,
@@ -108,4 +111,43 @@ export function getConnectorPathData(
     `${targetControlX} ${to.y}`,
     `${to.x} ${to.y}`,
   ].join(" ");
+}
+
+export function getViewportForElements(
+  elements: CanvasElement[],
+  screenSize: { width: number; height: number },
+  options: {
+    maxScale?: number;
+    minScale?: number;
+    padding?: number;
+  } = {},
+): CanvasViewport | null {
+  if (elements.length === 0 || screenSize.width <= 0 || screenSize.height <= 0) {
+    return null;
+  }
+
+  const padding = options.padding ?? 96;
+  const minScale = options.minScale ?? 0.18;
+  const maxScale = options.maxScale ?? 1;
+  const left = Math.min(...elements.map((element) => element.x));
+  const top = Math.min(...elements.map((element) => element.y));
+  const right = Math.max(...elements.map((element) => element.x + element.width));
+  const bottom = Math.max(...elements.map((element) => element.y + element.height));
+  const boundsWidth = Math.max(1, right - left);
+  const boundsHeight = Math.max(1, bottom - top);
+  const availableWidth = Math.max(1, screenSize.width - padding * 2);
+  const availableHeight = Math.max(1, screenSize.height - padding * 2);
+  const scale = clamp(
+    Math.min(maxScale, availableWidth / boundsWidth, availableHeight / boundsHeight),
+    minScale,
+    maxScale,
+  );
+  const centerX = left + boundsWidth / 2;
+  const centerY = top + boundsHeight / 2;
+
+  return {
+    x: screenSize.width / 2 - centerX * scale,
+    y: screenSize.height / 2 - centerY * scale,
+    scale,
+  };
 }

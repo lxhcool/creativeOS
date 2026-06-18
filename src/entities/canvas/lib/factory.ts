@@ -4,7 +4,9 @@ import type {
   CanvasElement,
   CanvasImageElement,
   CanvasMediaElement,
+  CanvasProcessorElement,
   CanvasShapeElement,
+  CanvasTemplateElement,
   CanvasTextElement,
 } from "../model/types";
 
@@ -80,6 +82,62 @@ export function createMediaElement(params: {
     rotation: 0,
     label: params.label ?? (params.kind === "audio" ? "音乐素材" : "视频素材"),
     src: params.src,
+  };
+}
+
+export function createTemplateElement(params: {
+  position: Position;
+  templateId: string;
+  title?: string;
+  props?: Record<string, unknown>;
+  width?: number;
+  height?: number;
+  artifactId?: string;
+}): CanvasTemplateElement {
+  const width = params.width ?? DEFAULT_NODE_WIDTH;
+  const height = params.height ?? DEFAULT_NODE_HEIGHT;
+
+  return {
+    id: generateId("template"),
+    kind: "template",
+    templateId: params.templateId,
+    x: params.position.x - width / 2,
+    y: params.position.y - height / 2,
+    width,
+    height,
+    rotation: 0,
+    title: params.title,
+    props: params.props,
+    artifactId: params.artifactId,
+  };
+}
+
+export function createProcessorElement(params: {
+  position: Position;
+  processorId: string;
+  title: string;
+  sourceIds: string[];
+  resultIds?: string[];
+  config: Record<string, unknown>;
+  width?: number;
+  height?: number;
+}): CanvasProcessorElement {
+  const width = params.width ?? 880;
+  const height = params.height ?? 720;
+
+  return {
+    id: generateId("processor"),
+    kind: "processor",
+    processorId: params.processorId,
+    title: params.title,
+    sourceIds: params.sourceIds,
+    resultIds: params.resultIds,
+    config: params.config,
+    x: params.position.x - width / 2,
+    y: params.position.y - height / 2,
+    width,
+    height,
+    rotation: 0,
   };
 }
 
