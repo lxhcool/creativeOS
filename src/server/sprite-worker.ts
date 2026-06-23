@@ -1,20 +1,28 @@
 import { spawn, type ChildProcess } from "child_process";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync } from "fs";
 import { createServer } from "net";
 import { join } from "path";
 import { setTimeout as delay } from "timers/promises";
 
 const WORKER_HOST = "127.0.0.1";
 const WORKER_START_TIMEOUT_MS = 60_000;
+const WORKER_LOG_PATH = join(
+  process.cwd(),
+  "tools/sprite-video-lab/work/logs/internal-worker.log",
+);
 
 declare global {
   var __creativeOsSpriteWorkerProcess: ChildProcess | undefined;
   var __creativeOsSpriteWorkerStarting: Promise<string> | undefined;
   var __creativeOsSpriteWorkerOrigin: string | undefined;
+  var __creativeOsSpriteWorkerServerMtime: number | undefined;
 }
 
 export function resetSpriteWorkerOrigin(): void {
+  stopInternalWorker();
   globalThis.__creativeOsSpriteWorkerOrigin = undefined;
   globalThis.__creativeOsSpriteWorkerStarting = undefined;
+  globalThis.__creativeOsSpriteWorkerServerMtime = undefined;
 }
 
 function allocateWorkerPort(): Promise<number> {
@@ -62,18 +70,25 @@ function spawnInternalWorker(port: number): ChildProcess {
   const python = process.env.CREATIVEOS_SPRITE_WORKER_PYTHON || "python3";
   const projectRoot = process.cwd();
   const serverPath = join(projectRoot, "tools/sprite-video-lab/server.py");
+  mkdirSync(join(projectRoot, "tools/sprite-video-lab/work/logs"), { recursive: true });
+  const logFd = openSync(WORKER_LOG_PATH, "w");
   const child = spawn(
     python,
     [serverPath, "--serve", "--host", WORKER_HOST, "--port", String(port)],
     {
       cwd: projectRoot,
       env: process.env,
-      stdio: "ignore",
+      stdio: ["ignore", logFd, logFd],
       detached: false,
     },
   );
 
   child.once("exit", () => {
+    try {
+      closeSync(logFd);
+    } catch {
+      // noop
+    }
     if (globalThis.__creativeOsSpriteWorkerProcess === child) {
       globalThis.__creativeOsSpriteWorkerProcess = undefined;
       globalThis.__creativeOsSpriteWorkerOrigin = undefined;
@@ -81,6 +96,7 @@ function spawnInternalWorker(port: number): ChildProcess {
   });
   child.unref();
   globalThis.__creativeOsSpriteWorkerProcess = child;
+  globalThis.__creativeOsSpriteWorkerServerMtime = currentServerMtime();
   return child;
 }
 
@@ -91,11 +107,18 @@ function stopInternalWorker(): void {
   }
   globalThis.__creativeOsSpriteWorkerProcess = undefined;
   globalThis.__creativeOsSpriteWorkerOrigin = undefined;
+  globalThis.__creativeOsSpriteWorkerServerMtime = undefined;
 }
 
 export async function getSpriteWorkerOrigin(): Promise<string> {
   const existingOrigin = globalThis.__creativeOsSpriteWorkerOrigin;
-  if (existingOrigin && (await isWorkerReady(existingOrigin))) return existingOrigin;
+  if (
+    existingOrigin &&
+    globalThis.__creativeOsSpriteWorkerServerMtime === currentServerMtime() &&
+    (await isWorkerReady(existingOrigin))
+  ) {
+    return existingOrigin;
+  }
 
   if (!globalThis.__creativeOsSpriteWorkerStarting) {
     globalThis.__creativeOsSpriteWorkerStarting = (async () => {
@@ -113,4 +136,31 @@ export async function getSpriteWorkerOrigin(): Promise<string> {
   }
 
   return globalThis.__creativeOsSpriteWorkerStarting;
+}
+
+function currentServerMtime(): number {
+  try {
+    return statSync(join(process.cwd(), "tools/sprite-video-lab/server.py")).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+export function getSpriteWorkerLogTail(maxChars = 1600): string {
+  try {
+    if (!existsSync(WORKER_LOG_PATH)) return "";
+    const content = readFileSync(WORKER_LOG_PATH, "utf8");
+    return content.slice(-maxChars).trim();
+  } catch {
+    return "";
+  }
+}
+
+export function getSpriteWorkerFailureMessage(detail: string): string {
+  const interrupted = /fetch failed|ECONNREFUSED|UND_ERR|terminated|aborted/i.test(detail);
+  if (!interrupted) return detail || "处理服务暂时不可用。";
+
+  const logTail = getSpriteWorkerLogTail();
+  if (!logTail) return "处理服务连接中断，未捕获到处理日志。";
+  return `处理服务连接中断。最后日志：${logTail}`;
 }

@@ -19,6 +19,7 @@ export type SpriteFrame = {
   index: number;
   name: string;
   original_name?: string;
+  source_url?: string;
   url: string;
   thumb_url?: string;
   width?: number;
@@ -84,6 +85,7 @@ export type SpriteMagic = MagicVariant & {
 };
 
 export type ProcessingOptions = {
+  processingPreset?: "fast" | "balanced" | "quality";
   keepEvery: number;
   outputScale: number;
   canvasMode: "auto" | "square_bottom" | "square_center";

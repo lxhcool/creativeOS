@@ -1,6 +1,7 @@
 import type { ProcessingOptions } from "./types";
 
 export const DEFAULT_SPRITE_PROCESSING_OPTIONS: ProcessingOptions = {
+  processingPreset: "fast",
   keepEvery: 2,
   outputScale: 100,
   canvasMode: "auto",
@@ -27,3 +28,57 @@ export const DEFAULT_SPRITE_PROCESSING_OPTIONS: ProcessingOptions = {
   batchSemiTransparentToBlack: false,
   batchSemiTransparentToOpaque: false,
 };
+
+export const SPRITE_PROCESSING_PRESETS: Record<
+  NonNullable<ProcessingOptions["processingPreset"]>,
+  ProcessingOptions
+> = {
+  fast: DEFAULT_SPRITE_PROCESSING_OPTIONS,
+  balanced: {
+    ...DEFAULT_SPRITE_PROCESSING_OPTIONS,
+    processingPreset: "balanced",
+    matteMode: "birefnet_chroma",
+    threshold: 38,
+    softness: 10,
+    despillStrength: 0.75,
+    haloPixels: 1,
+    batchGreenDesaturate: true,
+  },
+  quality: {
+    ...DEFAULT_SPRITE_PROCESSING_OPTIONS,
+    processingPreset: "quality",
+    keepEvery: 1,
+    matteMode: "birefnet_corridorkey_key",
+    threshold: 34,
+    softness: 12,
+    despillStrength: 0.85,
+    haloPixels: 1,
+    foregroundProtectEnabled: true,
+    foregroundProtectTolerance: 42,
+    foregroundProtectStrength: 0.75,
+    corridorkeyScreen: "auto",
+    batchGreenDesaturate: true,
+    batchSemiTransparentToOpaque: true,
+  },
+};
+
+export const CANVAS_DEFAULT_SPRITE_PROCESSING_OPTIONS =
+  {
+    ...SPRITE_PROCESSING_PRESETS.fast,
+    keepEvery: 2,
+    outputScale: 80,
+    softness: 10,
+    despillStrength: 0.85,
+    batchGreenDesaturate: true,
+  };
+
+export function applySpriteProcessingPreset(
+  options: ProcessingOptions,
+  preset: NonNullable<ProcessingOptions["processingPreset"]>,
+): ProcessingOptions {
+  return {
+    ...options,
+    ...SPRITE_PROCESSING_PRESETS[preset],
+    processingPreset: preset,
+  };
+}

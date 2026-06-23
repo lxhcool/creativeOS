@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
-import { getSpriteWorkerOrigin, resetSpriteWorkerOrigin } from "@/server/sprite-worker";
+import {
+  getSpriteWorkerFailureMessage,
+  getSpriteWorkerOrigin,
+  resetSpriteWorkerOrigin,
+} from "@/server/sprite-worker";
 
 export const runtime = "nodejs";
 
@@ -28,9 +32,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return Response.json(
       {
         ok: false,
-        error: /fetch failed|ECONNREFUSED|UND_ERR|terminated|aborted/i.test(detail)
-          ? "处理服务连接中断，请重试一次；如果还失败，刷新页面后再处理。"
-          : detail || "处理服务暂时不可用。",
+        error: getSpriteWorkerFailureMessage(detail),
         scope: "creativeOS internal sprite worker",
       },
       { status: 502 },

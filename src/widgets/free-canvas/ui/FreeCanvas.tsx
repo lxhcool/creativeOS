@@ -89,6 +89,7 @@ import {
 } from "../model/constants";
 import { CanvasNodeEditorPanel } from "./CanvasNodeEditorPanel";
 import { CanvasProcessorNodeOverlay } from "./CanvasProcessorNodeOverlay";
+import { CanvasSequenceTemplateOverlay } from "./CanvasSequenceTemplateOverlay";
 import {
   CanvasBrainPanel,
   type CanvasBrainChatMessage,
@@ -125,6 +126,8 @@ type CanvasExecutionOptions = {
 
 const PROCESSOR_NODE_WIDTH = 880;
 const PROCESSOR_NODE_HEIGHT = 720;
+const FRAME_LIST_TEMPLATE_WIDTH = 760;
+const FRAME_LIST_TEMPLATE_HEIGHT = 520;
 
 type CanvasNodeCommonProps = {
   id: string;
@@ -1277,6 +1280,34 @@ export function FreeCanvas() {
     },
   });
 
+  const updateSequenceTemplateProps = useCallback(
+    (sourceElement: CanvasTemplateElement, nextProps: Record<string, unknown>) => {
+      const jobId = typeof nextProps["jobId"] === "string" ? nextProps["jobId"] : undefined;
+      const nextElements = elements.map((element) => {
+        if (element.kind !== "template") return element;
+        if (
+          element.id !== sourceElement.id &&
+          (!jobId ||
+            element.props?.["jobId"] !== jobId ||
+            (element.templateId !== "sequence-viewer" && element.templateId !== "frame-sequence-list"))
+        ) {
+          return element;
+        }
+
+        return {
+          ...element,
+          props: {
+            ...(element.props || {}),
+            ...nextProps,
+          },
+        } as CanvasElement;
+      });
+
+      commitElements(nextElements);
+    },
+    [commitElements, elements],
+  );
+
   useEffect(() => {
     elements.forEach((element) => {
       if (element.kind !== "processor") return;
@@ -1292,6 +1323,25 @@ export function FreeCanvas() {
         y: element.y + element.height / 2 - PROCESSOR_NODE_HEIGHT / 2,
         width: PROCESSOR_NODE_WIDTH,
         height: PROCESSOR_NODE_HEIGHT,
+      } as Partial<CanvasElement>);
+    });
+  }, [elements, patchElementDraft]);
+
+  useEffect(() => {
+    elements.forEach((element) => {
+      if (element.kind !== "template" || element.templateId !== "frame-sequence-list") return;
+      if (
+        element.width >= FRAME_LIST_TEMPLATE_WIDTH &&
+        element.height >= FRAME_LIST_TEMPLATE_HEIGHT
+      ) {
+        return;
+      }
+
+      patchElementDraft(element.id, {
+        x: element.x + element.width / 2 - FRAME_LIST_TEMPLATE_WIDTH / 2,
+        y: element.y + element.height / 2 - FRAME_LIST_TEMPLATE_HEIGHT / 2,
+        width: FRAME_LIST_TEMPLATE_WIDTH,
+        height: FRAME_LIST_TEMPLATE_HEIGHT,
       } as Partial<CanvasElement>);
     });
   }, [elements, patchElementDraft]);
@@ -1513,6 +1563,28 @@ export function FreeCanvas() {
               patchElementDraft(element.id, updates as Partial<CanvasElement>)
             }
             onRun={(config) => void runProcessor(element, config)}
+          />
+        ) : null,
+      )}
+
+      {elements.map((element) =>
+        element.kind === "template" && element.templateId === "frame-sequence-list" ? (
+          <CanvasSequenceTemplateOverlay
+            key={`sequence_overlay_${element.id}`}
+            element={element}
+            viewport={viewport}
+            imageModelEntry={getModelEntryForKind("image")}
+            onSelect={() => {
+              setSelectedId(element.id);
+              setSelectedEdgeId(null);
+            }}
+            onMove={(updates) =>
+              patchElementDraft(element.id, updates as Partial<CanvasElement>)
+            }
+            onPropsChange={(props) =>
+              updateSequenceTemplateProps(element, props)
+            }
+            onMessage={(message) => appendAiMessage("assistant", message)}
           />
         ) : null,
       )}

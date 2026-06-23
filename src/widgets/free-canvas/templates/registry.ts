@@ -1,8 +1,10 @@
 import type { CanvasTemplateElement } from "@/entities/canvas/model/types";
+import { frameSequenceListTemplate } from "./frame-sequence-list";
 import { sequenceViewerTemplate } from "./sequence-viewer";
 import type { CanvasTemplateStrategy } from "./types";
 
 const templateStrategies: Record<string, CanvasTemplateStrategy> = {
+  [frameSequenceListTemplate.id]: frameSequenceListTemplate,
   [sequenceViewerTemplate.id]: sequenceViewerTemplate,
 };
 

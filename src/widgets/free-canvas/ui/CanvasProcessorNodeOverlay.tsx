@@ -97,6 +97,8 @@ export function CanvasProcessorNodeOverlay({
                 ? "处理中"
                 : element.status === "failed"
                   ? "处理失败"
+                  : element.error
+                    ? "已降级生成"
                   : "调整参数后手动处理"}
             </p>
           </div>
@@ -104,6 +106,11 @@ export function CanvasProcessorNodeOverlay({
             processor
           </span>
         </div>
+        {element.error && (
+          <p className="mb-3 shrink-0 rounded-md border border-amber-200/12 bg-amber-300/[0.08] px-3 py-2 text-xs leading-5 text-amber-100/80">
+            {element.error}
+          </p>
+        )}
         <CanvasProcessorControls
           element={element}
           mode="node"

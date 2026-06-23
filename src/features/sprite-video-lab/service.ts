@@ -101,6 +101,20 @@ export async function processSpriteMedia(params: {
   return data.job;
 }
 
+export async function getLatestSpriteJob(params: {
+  uploadId: string;
+  startedAfterMs: number;
+}): Promise<SpriteJob> {
+  const data = await spriteApi<{ ok: true; job: SpriteJob }>("/latest-job", {
+    method: "POST",
+    body: {
+      upload_id: params.uploadId,
+      started_after_ms: params.startedAfterMs,
+    },
+  });
+  return data.job;
+}
+
 export async function exportSpriteFrames(params: {
   jobId: string;
   selectedIndices: number[];

@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { CanvasProcessorElement } from "@/entities/canvas/model/types";
+import {
+  applySpriteProcessingPreset,
+  SPRITE_PROCESSING_PRESETS,
+} from "@/features/sprite-video-lab/defaults";
+import type { ProcessingOptions } from "@/features/sprite-video-lab/types";
 
 type Props = {
   element: CanvasProcessorElement;
@@ -25,9 +30,15 @@ export function CanvasProcessorControls({ element, mode = "panel", onRun }: Prop
   const isNodeMode = mode === "node";
   const chromaEnabled = bool(draft.chromaEnabled, true);
   const matteMode = String(draft.matteMode || "chroma");
+  const processingPreset = String(draft.processingPreset || "fast") as NonNullable<ProcessingOptions["processingPreset"]>;
   const showChroma = chromaEnabled && ["chroma", "birefnet_chroma", "corridorkey"].includes(matteMode);
   const showLuma = chromaEnabled && matteMode.includes("luma");
   const setValue = (updates: Record<string, unknown>) => setDraft((current) => ({ ...current, ...updates }));
+  const setPreset = (preset: NonNullable<ProcessingOptions["processingPreset"]>) => {
+    setDraft((current) =>
+      applySpriteProcessingPreset(current as ProcessingOptions, preset),
+    );
+  };
   const run = () => {
     onRun(draft);
   };
@@ -46,6 +57,7 @@ export function CanvasProcessorControls({ element, mode = "panel", onRun }: Prop
       <div className={isNodeMode ? "min-h-0 flex-1 overflow-visible" : "max-h-[58vh] overflow-y-auto pr-1"}>
         <div className={isNodeMode ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 gap-3"}>
           <Section title="输出" compact={isNodeMode}>
+            <Field label="预设" wide><Select value={processingPreset in SPRITE_PROCESSING_PRESETS ? processingPreset : "fast"} onChange={(value) => setPreset(value as NonNullable<ProcessingOptions["processingPreset"]>)} options={PROCESSING_PRESET_OPTIONS} /></Field>
             <Field label="抽帧间隔"><NumberInput value={num(draft.keepEvery, 2)} min={1} onChange={(keepEvery) => setValue({ keepEvery })} /></Field>
             <Field label="缩放比例"><NumberInput value={num(draft.outputScale, 100)} min={5} max={200} step={5} onChange={(outputScale) => setValue({ outputScale })} /></Field>
             <Field label="画布"><Select value={String(draft.canvasMode || "auto")} onChange={(canvasMode) => setValue({ canvasMode })} options={[["auto", "自适应居中"], ["square_bottom", "方形底部"], ["square_center", "方形居中"]]} /></Field>
@@ -85,7 +97,9 @@ export function CanvasProcessorControls({ element, mode = "panel", onRun }: Prop
   );
 }
 
-const MATTE_OPTIONS = [["chroma", "快速去绿幕"], ["birefnet_chroma", "AI 保主体去背景"], ["birefnet", "AI 抠主体"], ["corridorkey", "精细绿幕"], ["luma", "按明暗抠图"], ["birefnet_corridorkey", "AI + 精细边缘"], ["birefnet_luma", "AI + 保留亮部"], ["none", "不抠图"]];
+const PROCESSING_PRESET_OPTIONS = [["fast", "快速"], ["balanced", "均衡"], ["quality", "质量优先"]];
+
+const MATTE_OPTIONS = [["chroma", "快速去绿幕"], ["birefnet_chroma", "AI 保主体去背景"], ["birefnet", "AI 抠主体"], ["corridorkey", "精细绿幕"], ["luma", "按明暗抠图"], ["birefnet_corridorkey", "AI + 精细边缘"], ["birefnet_corridorkey_key", "AI + 收紧绿边"], ["birefnet_luma", "AI + 保留亮部"], ["birefnet_luma_key", "AI + 明暗收边"], ["birefnet_luma_corridorkey", "AI + 亮部 + 精细边缘"], ["none", "不抠图"]];
 
 function ChromaFields({ draft, setValue }: { draft: Record<string, unknown>; setValue: (updates: Record<string, unknown>) => void }) {
   return <><Field label="背景取色"><Select value={String(draft.keyMode || "auto")} onChange={(keyMode) => setValue({ keyMode })} options={[["auto", "自动"], ["manual", "手动"]]} /></Field><Field label="背景色"><TextInput value={String(draft.manualKeyHex || "#00ff00")} onChange={(manualKeyHex) => setValue({ manualKeyHex })} /></Field><Field label="去除强度"><NumberInput value={num(draft.threshold, 42)} onChange={(threshold) => setValue({ threshold })} /></Field><Field label="边缘柔和"><NumberInput value={num(draft.softness, 8)} onChange={(softness) => setValue({ softness })} /></Field></>;
