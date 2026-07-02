@@ -5,6 +5,8 @@ import type {
   CanvasActionIntent,
   CanvasBrainMessage,
   CanvasBrainPlan,
+  CanvasCollaborativeTextGenerationParams,
+  CanvasCollaborativeTextGenerationResult,
   CanvasImageGenerationParams,
   CanvasTextGenerationParams,
   CanvasVideoGenerationParams,
@@ -71,6 +73,37 @@ export async function requestCanvasTextGeneration(
   }
 
   return data.content;
+}
+
+export async function requestCanvasCollaborativeTextGeneration(
+  params: CanvasCollaborativeTextGenerationParams,
+): Promise<CanvasCollaborativeTextGenerationResult> {
+  const response = await fetch("/api/canvas/text-workflow", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: params.prompt,
+      current: params.current,
+      provider: serializeProvider(params.provider),
+      model: serializeTextModel(params.model),
+      sources: params.sources,
+      resultTextRole: params.resultTextRole,
+    }),
+  });
+
+  const data = (await response.json()) as CanvasCollaborativeTextGenerationResult & {
+    error?: string;
+  };
+  if (!response.ok || !data.content) {
+    throw new Error(data.error || "协作文本生成失败");
+  }
+
+  return {
+    content: data.content,
+    memory: data.memory,
+  };
 }
 
 export async function requestCanvasIntent(

@@ -17,6 +17,8 @@ import type {
 } from "@/types/provider";
 import {
   getProviderSupportedKinds,
+  inferModelKind,
+  normalizeModelCapabilities,
   PROVIDER_DEFAULT_URLS,
 } from "@/types/provider";
 import { generateId } from "@/lib/id";
@@ -119,6 +121,25 @@ function getModelRef(providerId: string, modelName: string): string {
   return `${providerId}:${modelName}`;
 }
 
+function normalizeUserModelKind(model: UserModel): UserModel {
+  const kind = inferModelKind({
+    modelName: model.modelName,
+    displayName: model.displayName,
+    capabilities: model.capabilities,
+    fallback: model.kind,
+  });
+  const capabilities = normalizeModelCapabilities({
+    kind,
+    capabilities: model.capabilities,
+  });
+
+  return {
+    ...model,
+    kind,
+    capabilities,
+  };
+}
+
 function toDefaultModelMap(defaults: UserDefaultModel[]): Record<ModelKind, string | undefined> {
   return defaults.reduce(
     (acc, entry) => {
@@ -144,18 +165,52 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     const persistedModels: Record<string, UserModel[]> = {};
 
     for (const provider of persistedProviders) {
-      persistedModels[provider.id] = await loadModelsForProvider(provider.id);
+      const loadedModels = await loadModelsForProvider(provider.id);
+      const normalizedModels = loadedModels.map(normalizeUserModelKind);
+      persistedModels[provider.id] = normalizedModels;
+
+      await Promise.all(
+        normalizedModels
+          .filter((model, index) => {
+            const original = loadedModels[index];
+            return (
+              original &&
+              (original.kind !== model.kind ||
+                original.capabilities.join(",") !== model.capabilities.join(","))
+            );
+          })
+          .map((model) => saveModel(model)),
+      );
     }
 
     const routingRules = await loadAllRoutingRules();
     const defaultModels = await loadAllDefaultModels();
+    const defaultModelMap = toDefaultModelMap(defaultModels);
+    for (const kind of Object.keys(defaultModelMap) as ModelKind[]) {
+      const modelRef = defaultModelMap[kind];
+      if (!modelRef) continue;
+      const [providerId, ...modelNameParts] = modelRef.split(":");
+      if (!providerId) continue;
+      const modelName = modelNameParts.join(":");
+      const model = persistedModels[providerId]?.find(
+        (entry: UserModel) => entry.modelName === modelName,
+      );
+      if (!model || model.kind === kind) continue;
+
+      await dbDeleteDefaultModel(kind);
+      defaultModelMap[kind] = undefined;
+      if (!defaultModelMap[model.kind]) {
+        await saveDefaultModel({ kind: model.kind, modelRef });
+        defaultModelMap[model.kind] = modelRef;
+      }
+    }
     const merged = mergeProviderSettings(persistedProviders, persistedModels);
 
     set({
       providers: merged.providers,
       models: merged.models,
       routingRules,
-      defaultModels: toDefaultModelMap(defaultModels),
+      defaultModels: defaultModelMap,
       isLoaded: true,
     });
 
@@ -278,13 +333,23 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     endpoint,
     options,
   }) => {
-    const model: UserModel = {
-      id: generateId("model"),
-      providerId,
-      kind,
+    const inferredKind = inferModelKind({
       modelName,
       displayName,
       capabilities,
+      fallback: kind,
+    });
+    const normalizedCapabilities = normalizeModelCapabilities({
+      kind: inferredKind,
+      capabilities,
+    });
+    const model: UserModel = {
+      id: generateId("model"),
+      providerId,
+      kind: inferredKind,
+      modelName,
+      displayName,
+      capabilities: normalizedCapabilities,
       contextWindow: contextWindow || 65536,
       maxOutputTokens: maxOutputTokens || 4096,
       costPer1kInput,
@@ -309,10 +374,21 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
   updateModel: async (id, updates) => {
     const location = findModelLocation(get().models, id);
     if (!location) return;
+    const inferredKind = inferModelKind({
+      modelName: updates.modelName || location.model.modelName,
+      displayName: updates.displayName || location.model.displayName,
+      capabilities: updates.capabilities || location.model.capabilities,
+      fallback: updates.kind || location.model.kind,
+    });
 
     const updated: UserModel = {
       ...location.model,
       ...updates,
+      kind: inferredKind,
+      capabilities: normalizeModelCapabilities({
+        kind: inferredKind,
+        capabilities: updates.capabilities || location.model.capabilities,
+      }),
     };
 
     await saveModel(updated);
@@ -320,8 +396,16 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
     const oldRef = getModelRef(location.providerId, location.model.modelName);
     const newRef = getModelRef(location.providerId, updated.modelName);
     const defaultKind = (location.model.kind || "text") as ModelKind;
-    if (get().defaultModels[defaultKind] === oldRef && oldRef !== newRef) {
-      await saveDefaultModel({ kind: updated.kind || defaultKind, modelRef: newRef });
+    const nextKind = updated.kind || defaultKind;
+    const wasDefaultForOldKind = get().defaultModels[defaultKind] === oldRef;
+    const shouldSetDefaultForNextKind =
+      wasDefaultForOldKind && (!get().defaultModels[nextKind] || defaultKind === nextKind);
+
+    if (wasDefaultForOldKind && defaultKind !== nextKind) {
+      await dbDeleteDefaultModel(defaultKind);
+    }
+    if (shouldSetDefaultForNextKind && (oldRef !== newRef || defaultKind !== nextKind)) {
+      await saveDefaultModel({ kind: nextKind, modelRef: newRef });
     }
 
     set((state) => ({
@@ -331,14 +415,13 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
           (entry) => (entry.id === id ? updated : entry),
         ),
       },
-      defaultModels:
-        state.defaultModels[defaultKind] === oldRef && oldRef !== newRef
-          ? {
-              ...state.defaultModels,
-              [defaultKind]: undefined,
-              [updated.kind || defaultKind]: newRef,
-            }
-          : state.defaultModels,
+      defaultModels: wasDefaultForOldKind
+        ? {
+            ...state.defaultModels,
+            [defaultKind]: defaultKind === nextKind ? newRef : undefined,
+            ...(shouldSetDefaultForNextKind ? { [nextKind]: newRef } : {}),
+          }
+        : state.defaultModels,
     }));
   },
 

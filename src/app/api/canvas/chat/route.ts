@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ModelGateway } from "@/services/model/gateway";
 import type { ModelGatewayConfig } from "@/services/model/types";
+import { toCanvasTextGenerationErrorMessage } from "../lib/errors";
 
 const providerSchema = z.object({
   id: z.string().min(1),
@@ -136,7 +137,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ content: result.content.trim() });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "画布大脑回复失败";
+    const message = toCanvasTextGenerationErrorMessage(error, "画布大脑回复失败，请稍后重试。");
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

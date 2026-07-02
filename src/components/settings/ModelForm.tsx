@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import {
+  inferModelKind,
   MODEL_KIND_LABELS,
+  normalizeModelCapabilities,
   type ModelKind,
   type ProviderType,
   type UserModel,
@@ -49,7 +51,7 @@ export function ModelForm({
   providerType,
 }: ModelFormProps) {
   const isEdit = !!existingModel;
-  const effectiveKind = existingModel?.kind || modelKind;
+  const fallbackKind = existingModel?.kind || modelKind;
 
   const [modelName, setModelName] = useState(existingModel?.modelName || "");
   const [displayName, setDisplayName] = useState(
@@ -73,6 +75,12 @@ export function ModelForm({
   const [endpoint, setEndpoint] = useState(existingModel?.endpoint || "");
   const [options, setOptions] = useState(existingModel?.options || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const effectiveKind = inferModelKind({
+    modelName,
+    displayName,
+    capabilities,
+    fallback: fallbackKind,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -85,11 +93,20 @@ export function ModelForm({
     setCostPer1kInput(existingModel?.costPer1kInput?.toString() || "");
     setCostPer1kOutput(existingModel?.costPer1kOutput?.toString() || "");
     setEndpoint(
-      existingModel?.endpoint || getDefaultEndpoint(effectiveKind, providerType),
+      existingModel?.endpoint || getDefaultEndpoint(fallbackKind, providerType),
     );
     setOptions(existingModel?.options || "");
     setErrors({});
-  }, [effectiveKind, existingModel, open, providerType]);
+  }, [existingModel, fallbackKind, open, providerType]);
+
+  useEffect(() => {
+    if (!open || effectiveKind === "text") return;
+    const imageEndpoint = getDefaultEndpoint("image", providerType);
+    const videoEndpoint = getDefaultEndpoint("video", providerType);
+    if (!endpoint.trim() || endpoint === imageEndpoint || endpoint === videoEndpoint) {
+      setEndpoint(getDefaultEndpoint(effectiveKind, providerType));
+    }
+  }, [effectiveKind, endpoint, open, providerType]);
 
   const toggleCapability = (capability: string) => {
     setCapabilities((current) =>
@@ -128,7 +145,10 @@ export function ModelForm({
       kind: effectiveKind,
       modelName: modelName.trim(),
       displayName: displayName.trim() || undefined,
-      capabilities,
+      capabilities: normalizeModelCapabilities({
+        kind: effectiveKind,
+        capabilities,
+      }),
       contextWindow,
       maxOutputTokens,
       costPer1kInput: costPer1kInput ? parseFloat(costPer1kInput) : undefined,
@@ -158,7 +178,7 @@ export function ModelForm({
             }
           }}
           error={errors["modelName"]}
-          hint="API 调用时使用的模型标识，例如 deepseek-chat、gpt-4.1"
+          hint={`API 调用时使用的模型标识，例如 deepseek-chat、gpt-4.1。当前自动识别为：${MODEL_KIND_LABELS[effectiveKind]}`}
           required
         />
 

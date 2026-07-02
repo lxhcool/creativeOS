@@ -18,6 +18,40 @@ export type CanvasArtifactType =
 
 export type CanvasGenerationStatus = "idle" | "generating" | "done" | "failed";
 
+export type CanvasTextRole =
+  | "general"
+  | "article"
+  | "novel_setup"
+  | "novel_outline"
+  | "novel_chapter_outline"
+  | "novel_chapter"
+  | "character"
+  | "script"
+  | "storyboard"
+  | "prompt";
+
+export interface CanvasTextRevision {
+  id: string;
+  text: string;
+  createdAt: string;
+  label?: string;
+  modelRef?: string;
+}
+
+export interface CanvasTextMeta {
+  title?: string;
+  chapterNo?: number;
+  version?: number;
+  sourceNodeId?: string;
+  sourceRole?: CanvasTextRole;
+  parentNodeId?: string;
+  sourceRunId?: string;
+  agentSummary?: string;
+  continuityNotes?: string[];
+  nextHooks?: string[];
+  revisions?: CanvasTextRevision[];
+}
+
 export interface CanvasElementBase {
   id: string;
   kind: CanvasElementKind;
@@ -35,6 +69,8 @@ export interface CanvasElementBase {
 
 export interface CanvasTextElement extends CanvasElementBase {
   kind: "text";
+  textRole?: CanvasTextRole;
+  meta?: CanvasTextMeta;
   text: string;
   fill: string;
   fontSize: number;

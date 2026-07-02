@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ModelGateway } from "@/services/model/gateway";
 import type { ModelGatewayConfig } from "@/services/model/types";
+import { toCanvasTextGenerationErrorMessage } from "../lib/errors";
 
 const providerSchema = z.object({
   id: z.string().min(1),
@@ -125,7 +126,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result.data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "意图识别失败";
+    const message = toCanvasTextGenerationErrorMessage(error, "意图识别失败，请稍后重试。");
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

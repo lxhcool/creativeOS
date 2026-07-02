@@ -1,12 +1,18 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasEdge, CanvasElement } from "@/entities/canvas/model/types";
 import { HISTORY_LIMIT } from "../model/constants";
 import type { CanvasDraftEdge, CanvasSnapshot } from "../model/types";
+
+type CanvasCommitInput =
+  | { elements?: CanvasElement[]; edges?: CanvasEdge[] }
+  | ((current: CanvasSnapshot) => { elements?: CanvasElement[]; edges?: CanvasEdge[] });
 
 export function useCanvasDocument() {
   const dragSnapshotRef = useRef<CanvasElement[] | null>(null);
   const [elements, setElements] = useState<CanvasElement[]>([]);
   const [edges, setEdges] = useState<CanvasEdge[]>([]);
+  const elementsRef = useRef<CanvasElement[]>([]);
+  const edgesRef = useRef<CanvasEdge[]>([]);
   const [past, setPast] = useState<CanvasSnapshot[]>([]);
   const [future, setFuture] = useState<CanvasSnapshot[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -14,17 +20,44 @@ export function useCanvasDocument() {
   const [draftEdge, setDraftEdge] = useState<CanvasDraftEdge | null>(null);
   const [draggingElementId, setDraggingElementId] = useState<string | null>(null);
 
+  useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  const replaceElements = useCallback((nextElements: CanvasElement[]) => {
+    elementsRef.current = nextElements;
+    setElements(nextElements);
+  }, []);
+
+  const replaceEdges = useCallback((nextEdges: CanvasEdge[]) => {
+    edgesRef.current = nextEdges;
+    setEdges(nextEdges);
+  }, []);
+
   const commitCanvas = useCallback(
-    (next: { elements?: CanvasElement[]; edges?: CanvasEdge[] }) => {
+    (nextInput: CanvasCommitInput) => {
+      const currentElements = elementsRef.current;
+      const currentEdges = edgesRef.current;
+      const next =
+        typeof nextInput === "function"
+          ? nextInput({ elements: currentElements, edges: currentEdges })
+          : nextInput;
+      const nextElements = next.elements ?? currentElements;
+      const nextEdges = next.edges ?? currentEdges;
+
       setPast((current) => [
         ...current.slice(-(HISTORY_LIMIT - 1)),
-        { elements, edges },
+        { elements: currentElements, edges: currentEdges },
       ]);
-      setElements(next.elements ?? elements);
-      setEdges(next.edges ?? edges);
+      replaceElements(nextElements);
+      replaceEdges(nextEdges);
       setFuture([]);
     },
-    [edges, elements],
+    [replaceEdges, replaceElements],
   );
 
   const commitElements = useCallback(
@@ -32,33 +65,36 @@ export function useCanvasDocument() {
       const nextElementIds = new Set(nextElements.map((element) => element.id));
       commitCanvas({
         elements: nextElements,
-        edges: edges.filter(
+        edges: edgesRef.current.filter(
           (edge) =>
             nextElementIds.has(edge.sourceId) && nextElementIds.has(edge.targetId),
         ),
       });
     },
-    [commitCanvas, edges],
+    [commitCanvas],
   );
 
   const updateElement = useCallback(
     (id: string, updates: Partial<CanvasElement>) => {
+      const currentElements = elementsRef.current;
       commitElements(
-        elements.map((element) =>
+        currentElements.map((element) =>
           element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
         ),
       );
     },
-    [commitElements, elements],
+    [commitElements],
   );
 
   const patchElementDraft = useCallback(
     (id: string, updates: Partial<CanvasElement>) => {
-      setElements((current) =>
-        current.map((element) =>
+      setElements((current) => {
+        const nextElements = current.map((element) =>
           element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
-        ),
-      );
+        );
+        elementsRef.current = nextElements;
+        return nextElements;
+      });
     },
     [],
   );
@@ -67,10 +103,10 @@ export function useCanvasDocument() {
 
   const beginElementDrag = useCallback(
     (id: string) => {
-      dragSnapshotRef.current = elements;
+      dragSnapshotRef.current = elementsRef.current;
       setDraggingElementId(id);
     },
-    [elements],
+    [],
   );
 
   const finishElementDrag = useCallback(
@@ -84,18 +120,24 @@ export function useCanvasDocument() {
         return;
       }
 
-      const nextElements = snapshot.map((element) =>
+      const latestElements = elementsRef.current;
+      const snapshotById = new Map(snapshot.map((element) => [element.id, element]));
+      const previousElements = latestElements.map(
+        (element) => snapshotById.get(element.id) ?? element,
+      );
+      const nextElements = latestElements.map((element) =>
         element.id === id ? ({ ...element, ...updates } as CanvasElement) : element,
       );
+      const currentEdges = edgesRef.current;
 
       setPast((current) => [
         ...current.slice(-(HISTORY_LIMIT - 1)),
-        { elements: snapshot, edges },
+        { elements: previousElements, edges: currentEdges },
       ]);
-      setElements(nextElements);
+      replaceElements(nextElements);
       setFuture([]);
     },
-    [edges, updateElement],
+    [replaceElements, updateElement],
   );
 
   const undo = useCallback(() => {
@@ -103,15 +145,18 @@ export function useCanvasDocument() {
       const previous = currentPast[currentPast.length - 1];
       if (!previous) return currentPast;
 
-      setFuture((currentFuture) => [{ elements, edges }, ...currentFuture]);
-      setElements(previous.elements);
-      setEdges(previous.edges);
+      setFuture((currentFuture) => [
+        { elements: elementsRef.current, edges: edgesRef.current },
+        ...currentFuture,
+      ]);
+      replaceElements(previous.elements);
+      replaceEdges(previous.edges);
       setSelectedId(null);
       setSelectedEdgeId(null);
       setDraftEdge(null);
       return currentPast.slice(0, -1);
     });
-  }, [edges, elements]);
+  }, [replaceEdges, replaceElements]);
 
   const redo = useCallback(() => {
     setFuture((currentFuture) => {
@@ -119,25 +164,30 @@ export function useCanvasDocument() {
       if (!next) return currentFuture;
 
       setPast((currentPast) =>
-        [...currentPast, { elements, edges }].slice(-HISTORY_LIMIT),
+        [
+          ...currentPast,
+          { elements: elementsRef.current, edges: edgesRef.current },
+        ].slice(-HISTORY_LIMIT),
       );
-      setElements(next.elements);
-      setEdges(next.edges);
+      replaceElements(next.elements);
+      replaceEdges(next.edges);
       setSelectedId(null);
       setSelectedEdgeId(null);
       setDraftEdge(null);
       return currentFuture.slice(1);
     });
-  }, [edges, elements]);
+  }, [replaceEdges, replaceElements]);
 
   const deleteElement = useCallback(
     (elementId: string) => {
-      const target = elements.find((element) => element.id === elementId);
+      const currentElements = elementsRef.current;
+      const currentEdges = edgesRef.current;
+      const target = currentElements.find((element) => element.id === elementId);
       if (target?.status === "generating") return;
 
       commitCanvas({
-        elements: elements.filter((element) => element.id !== elementId),
-        edges: edges.filter(
+        elements: currentElements.filter((element) => element.id !== elementId),
+        edges: currentEdges.filter(
           (edge) => edge.sourceId !== elementId && edge.targetId !== elementId,
         ),
       });
@@ -145,37 +195,37 @@ export function useCanvasDocument() {
       setSelectedEdgeId(null);
       setDraftEdge(null);
     },
-    [commitCanvas, edges, elements],
+    [commitCanvas],
   );
 
   const deleteEdge = useCallback(
     (edgeId: string) => {
       commitCanvas({
-        edges: edges.filter((edge) => edge.id !== edgeId),
+        edges: edgesRef.current.filter((edge) => edge.id !== edgeId),
       });
       setSelectedEdgeId(null);
       setDraftEdge(null);
     },
-    [commitCanvas, edges],
+    [commitCanvas],
   );
 
   const addElement = useCallback(
     (element: CanvasElement) => {
-      commitCanvas({ elements: [...elements, element] });
+      commitCanvas({ elements: [...elementsRef.current, element] });
       setSelectedId(element.id);
       setSelectedEdgeId(null);
     },
-    [commitCanvas, elements],
+    [commitCanvas],
   );
 
   const clearCanvas = useCallback(() => {
-    if (elements.length === 0) return;
+    if (elementsRef.current.length === 0) return;
     if (!window.confirm("确定清空画布上的所有元素吗？")) return;
     commitCanvas({ elements: [], edges: [] });
     setSelectedId(null);
     setSelectedEdgeId(null);
     setDraftEdge(null);
-  }, [commitCanvas, elements.length]);
+  }, [commitCanvas]);
 
   return {
     addElement,
@@ -198,8 +248,8 @@ export function useCanvasDocument() {
     selectedEdgeId,
     selectedId,
     setDraftEdge,
-    setEdges,
-    setElements,
+    setEdges: replaceEdges,
+    setElements: replaceElements,
     setSelectedEdgeId,
     setSelectedId,
     undo,

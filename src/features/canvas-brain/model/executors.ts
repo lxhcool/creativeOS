@@ -1,6 +1,11 @@
-import type { CanvasElement } from "@/entities/canvas/model/types";
+import type {
+  CanvasElement,
+  CanvasTextMeta,
+  CanvasTextRole,
+} from "@/entities/canvas/model/types";
 import type { UserModel, UserProvider } from "@/types/provider";
 import {
+  requestCanvasCollaborativeTextGeneration,
   requestCanvasImageGeneration,
   requestCanvasIntent,
   requestCanvasTextGeneration,
@@ -9,7 +14,6 @@ import {
 import {
   buildGenerationPrompt,
   buildVisibleResultPrompt,
-  getElementMaterialText,
   toTextGenerationSource,
 } from "../lib/material";
 import type { CanvasActionIntent } from "./types";
@@ -49,6 +53,8 @@ type CanvasBrainTextExecutionParams = {
   provider: UserProvider;
   model: UserModel;
   intentOverride?: CanvasActionIntent;
+  resultTextRole?: CanvasTextRole;
+  generationMode?: "single" | "collaborative";
 };
 
 export type CanvasBrainTextExecutionResult =
@@ -57,6 +63,7 @@ export type CanvasBrainTextExecutionResult =
       intent: CanvasActionIntent;
       content: string;
       shouldUpdateCurrent: boolean;
+      meta?: Partial<CanvasTextMeta>;
     }
   | {
       kind: "media";
@@ -191,6 +198,14 @@ export function getCanvasBrainTextDoneMessage(createdResult: boolean): string {
   return createdResult
     ? "已发送，结果已生成到右侧节点。"
     : "已按你的要求更新当前文本节点。";
+}
+
+export function getCanvasBrainTextGeneratingMessage(params: {
+  generationMode?: "single" | "collaborative";
+}): string {
+  return params.generationMode === "collaborative"
+    ? "创作组正在协作：先规划，再写作、润色和整理记忆..."
+    : "正在生成文本...";
 }
 
 export function getCanvasBrainReadyElementPatch(modelRef: string): Partial<CanvasElement> {
@@ -370,20 +385,36 @@ export async function executeCanvasBrainTextNode(
     };
   }
 
-  const content = await requestCanvasTextGeneration({
+  const textGenerationParams = {
     prompt: intent.instruction || params.prompt,
     current: toTextGenerationSource(params.element),
     provider: params.provider,
     model: params.model,
     sources: params.sourceElements.map(toTextGenerationSource),
-  });
+  };
+  const collaborative =
+    params.generationMode === "collaborative" && params.resultTextRole;
+  const result = collaborative
+    ? await requestCanvasCollaborativeTextGeneration({
+        ...textGenerationParams,
+        resultTextRole: params.resultTextRole!,
+      })
+    : {
+        content: await requestCanvasTextGeneration(textGenerationParams),
+      };
 
   return {
     kind: "text",
     intent,
-    content,
-    shouldUpdateCurrent:
-      intent.placement === "update_current" ||
-      !getElementMaterialText(params.element),
+    content: result.content,
+    shouldUpdateCurrent: intent.placement === "update_current",
+    meta: result.memory
+      ? {
+          title: result.memory.title,
+          agentSummary: result.memory.summary,
+          continuityNotes: result.memory.continuityNotes,
+          nextHooks: result.memory.nextHooks,
+        }
+      : undefined,
   };
 }

@@ -9,7 +9,9 @@ import type {
   CanvasElement,
   CanvasImageElement,
   CanvasMediaElement,
+  CanvasTextMeta,
   CanvasTextElement,
+  CanvasTextRole,
 } from "../model/types";
 
 type Position = {
@@ -42,8 +44,14 @@ export function createTextResultNode(params: {
   text: string;
   prompt: string;
   modelRef: string;
+  position?: Position;
+  textRole?: CanvasTextRole;
+  meta?: CanvasTextMeta;
 }): CanvasTextElement {
-  const node = createTextElement(getResultNodePosition(params.source));
+  const node = createTextElement(params.position || getResultNodePosition(params.source), {
+    textRole: params.textRole,
+    meta: params.meta,
+  });
 
   return {
     ...node,

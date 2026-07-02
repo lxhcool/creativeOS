@@ -31,6 +31,7 @@ export {
   getCanvasBrainDoneMessage,
   getCanvasBrainFailureMessage,
   getCanvasBrainGeneratingMessage,
+  getCanvasBrainTextGeneratingMessage,
   getCanvasBrainMediaNodeSize,
   getCanvasBrainMissingModelMessage,
   getCanvasBrainReadyElementPatch,

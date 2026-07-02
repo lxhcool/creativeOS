@@ -4,6 +4,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+const imageCache = new Map<string, HTMLImageElement>();
+
 export function useHtmlImage(src?: string) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
 
@@ -13,10 +15,26 @@ export function useHtmlImage(src?: string) {
       return;
     }
 
+    const cachedImage = imageCache.get(src);
+    if (cachedImage?.complete) {
+      setImage(cachedImage);
+      return;
+    }
+
+    let cancelled = false;
     const nextImage = new window.Image();
     nextImage.crossOrigin = "anonymous";
-    nextImage.onload = () => setImage(nextImage);
+    nextImage.onload = () => {
+      imageCache.set(src, nextImage);
+      if (!cancelled) {
+        setImage(nextImage);
+      }
+    };
     nextImage.src = src;
+
+    return () => {
+      cancelled = true;
+    };
   }, [src]);
 
   return image;

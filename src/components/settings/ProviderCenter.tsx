@@ -25,8 +25,10 @@ import { ProviderForm } from "./ProviderForm";
 import { useProviderStore } from "@/stores/useProviderStore";
 import {
   getProviderSupportedKinds,
+  inferModelKind,
   MODEL_KIND_DESCRIPTIONS,
   MODEL_KIND_LABELS,
+  normalizeModelCapabilities,
   type DiscoveredModel,
   type ModelKind,
   type ProviderType,
@@ -364,40 +366,51 @@ export function ProviderCenter() {
 
       const existingNames = new Set(
         (models[discoveryProvider.id] || [])
-          .filter((model) => (model.kind || "text") === discoveryKind)
-          .map((model) => model.modelName),
+          .map((model) => `${model.kind || "text"}:${model.modelName}`),
       );
-      const modelsToAdd = selectedModels.filter(
-        (model) => !existingNames.has(model.modelName),
-      );
+      const modelsToAdd = selectedModels
+        .map((model) => ({
+          ...model,
+          inferredKind: inferModelKind({
+            modelName: model.modelName,
+            displayName: model.displayName,
+            capabilities: model.capabilities,
+            fallback: discoveryKind,
+          }),
+        }))
+        .filter((model) => !existingNames.has(`${model.inferredKind}:${model.modelName}`));
+      const firstAddedByKind = new Map<ModelKind, string>();
 
       for (const model of modelsToAdd) {
         await addModel({
           providerId: discoveryProvider.id,
-          kind: discoveryKind,
+          kind: model.inferredKind,
           modelName: model.modelName,
           displayName: model.displayName,
-          capabilities:
-            discoveryKind === "text"
-              ? model.capabilities.length > 0
-                ? model.capabilities
-                : ["text", "json"]
-              : [discoveryKind],
+          capabilities: normalizeModelCapabilities({
+            kind: model.inferredKind,
+            capabilities: model.capabilities,
+          }),
           contextWindow: model.contextWindow,
           maxOutputTokens: model.maxOutputTokens,
-          endpoint: getDefaultEndpoint(discoveryProvider.type, discoveryKind),
+          endpoint: getDefaultEndpoint(discoveryProvider.type, model.inferredKind),
         });
-        existingNames.add(model.modelName);
+        existingNames.add(`${model.inferredKind}:${model.modelName}`);
+        if (!firstAddedByKind.has(model.inferredKind)) {
+          firstAddedByKind.set(
+            model.inferredKind,
+            `${discoveryProvider.id}:${model.modelName}`,
+          );
+        }
       }
 
-      if (!defaultModels[discoveryKind] && modelsToAdd[0]) {
-        await setDefaultModel(
-          discoveryKind,
-          `${discoveryProvider.id}:${modelsToAdd[0].modelName}`,
-        );
+      for (const [kind, modelRef] of firstAddedByKind.entries()) {
+        if (!defaultModels[kind]) {
+          await setDefaultModel(kind, modelRef);
+        }
       }
 
-      setActiveKind(discoveryKind);
+      setActiveKind(modelsToAdd[0]?.inferredKind || discoveryKind);
       setDiscoveryProvider(undefined);
       setDiscoveredModels([]);
       syncToModelGateway();

@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@langchain/langgraph": "^1.4.1",
+    "@radix-ui/react-popover": "^1.1.18",
+    "@radix-ui/react-scroll-area": "^1.2.13",
     "dexie": "latest",
     "konva": "^10.3.0",
     "lucide-react": "^1.17.0",

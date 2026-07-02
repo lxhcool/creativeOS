@@ -2,8 +2,18 @@
 
 import {
   Bot,
+  Eye,
+  Trash2,
+  X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import {
@@ -11,7 +21,6 @@ import {
   Group,
   Image as KonvaImage,
   Layer,
-  Path,
   Rect,
   Stage,
   Text,
@@ -24,7 +33,6 @@ import {
   isCanvasEdge,
   isCanvasElement,
 } from "@/entities/canvas/lib/factory";
-import { getCanvasActionsForElement } from "@/features/canvas-actions";
 import {
   executeCanvasBrainMediaGeneration,
   executeCanvasBrainTextNode,
@@ -36,6 +44,7 @@ import {
   getCanvasBrainMissingModelMessage,
   getCanvasBrainReadyElementPatch,
   getCanvasBrainTextDoneMessage,
+  getCanvasBrainTextGeneratingMessage,
   getCanvasReferenceImageUrls,
   getCanvasModelKindForOutput,
   hasConcreteAsset,
@@ -52,6 +61,10 @@ import {
   createTextResultNode,
 } from "@/entities/canvas/lib/workflow";
 import {
+  getCanvasTextRole,
+  getCanvasTextRoleConfig,
+} from "@/entities/canvas/lib/textRoles";
+import {
   getCanvasNodeEditorFrame,
   getCanvasNodeEditorTitle,
 } from "../lib/editor";
@@ -63,8 +76,6 @@ import {
 } from "../lib/media";
 import {
   clamp,
-  getConnectorPathData,
-  getInputPortPosition,
   getOutputPortPosition,
   getTextNodeSize,
   getViewportForElements,
@@ -74,6 +85,7 @@ import {
 import { useCanvasDocument } from "../lib/useCanvasDocument";
 import { useCanvasActionRunner } from "../lib/useCanvasActionRunner";
 import { useCanvasModelSelection } from "../lib/useCanvasModelSelection";
+import { useCanvasRenderWindow } from "../lib/useCanvasRenderWindow";
 import {
   darkPanel,
   DEFAULT_NODE_HEIGHT,
@@ -83,11 +95,18 @@ import {
   MIN_SCALE,
   NODE_PADDING,
   NODE_RADIUS,
-  PORT_RADIUS,
   SCALE_OPTIONS,
   VIDEO_CONTROLS_HIDE_DELAY,
 } from "../model/constants";
-import { CanvasNodeEditorPanel } from "./CanvasNodeEditorPanel";
+import {
+  CanvasConnectionHandle,
+  DraftEdgeNode,
+  MemoCanvasEdgeNode,
+} from "./CanvasConnectors";
+import {
+  CanvasNodeEditorPanel,
+  type CanvasNodeGenerateOptions,
+} from "./CanvasNodeEditorPanel";
 import { CanvasProcessorNodeOverlay } from "./CanvasProcessorNodeOverlay";
 import { CanvasSequenceTemplateOverlay } from "./CanvasSequenceTemplateOverlay";
 import {
@@ -95,13 +114,11 @@ import {
   type CanvasBrainChatMessage,
 } from "./CanvasBrainPanel";
 import { CanvasApiConfigModal } from "./CanvasApiConfigModal";
-import { CanvasNodeActionToolbar } from "./CanvasNodeActionToolbar";
 import { CanvasSideToolbar } from "./CanvasSideToolbar";
 import { CanvasTopToolbar } from "./CanvasTopToolbar";
 import type {
   CanvasEdge,
   CanvasElement,
-  CanvasElementKind,
   CanvasImageElement,
   CanvasMediaElement,
   CanvasProcessorElement,
@@ -109,9 +126,10 @@ import type {
   CanvasShapeElement,
   CanvasTemplateElement,
   CanvasTextElement,
+  CanvasTextMeta,
+  CanvasTextRole,
   CanvasViewport,
 } from "@/entities/canvas/model/types";
-import type { CanvasDraftEdge } from "../model/types";
 import { renderCanvasTemplateContent } from "../templates/registry";
 
 type AiMessage = CanvasBrainChatMessage;
@@ -120,9 +138,18 @@ type CanvasExecutionOptions = {
   extraSourceIds?: string[];
   extraSourceElements?: CanvasElement[];
   intentOverride?: CanvasActionIntent;
+  resultTextRole?: CanvasTextRole;
+  generationMode?: "single" | "collaborative";
   baseElements?: CanvasElement[];
   baseEdges?: CanvasEdge[];
+  actionLabel?: string;
 };
+
+type CanvasNodeContextMenuState = {
+  elementId: string;
+  x: number;
+  y: number;
+} | null;
 
 const PROCESSOR_NODE_WIDTH = 880;
 const PROCESSOR_NODE_HEIGHT = 720;
@@ -137,10 +164,11 @@ type CanvasNodeCommonProps = {
   height: number;
   rotation: number;
   draggable: boolean;
-  onClick: () => void;
-  onTap: () => void;
+  onClick?: () => void;
+  onTap?: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
+  onContextMenu?: (event: KonvaEventObject<MouseEvent>) => void;
   onDragStart: () => void;
   onDragMove: (event: KonvaEventObject<DragEvent>) => void;
   onDragEnd: (event: KonvaEventObject<DragEvent>) => void;
@@ -154,6 +182,29 @@ type CanvasNodeRendererProps<TElement extends CanvasElement = CanvasElement> = {
   onUploadImage: (element: CanvasImageElement) => void;
   onUploadVideo: (element: CanvasMediaElement) => void;
   onUploadAudio: (element: CanvasMediaElement) => void;
+  onPreview?: () => void;
+};
+
+type CanvasNodeBadge = {
+  title: string;
+  color: string;
+};
+
+type CanvasElementNodeProps = {
+  element: CanvasElement;
+  selected: boolean;
+  dragging: boolean;
+  onSelect: () => void;
+  onHover: () => void;
+  onLeave: () => void;
+  onContextMenu: (event: KonvaEventObject<MouseEvent>) => void;
+  onDragStart: () => void;
+  onPreviewChange: (updates: Partial<CanvasElement>) => void;
+  onChange: (updates: Partial<CanvasElement>) => void;
+  onUploadImage: (element: CanvasImageElement) => void;
+  onUploadVideo: (element: CanvasMediaElement) => void;
+  onUploadAudio: (element: CanvasMediaElement) => void;
+  onPreview: (element: CanvasTextElement) => void;
 };
 
 function getMessageId(): string {
@@ -204,6 +255,29 @@ function getMediaNodeSize(intrinsicWidth: number, intrinsicHeight: number): {
 const getImageNodeSize = getMediaNodeSize;
 const getVideoNodeSize = getMediaNodeSize;
 
+const TEXT_ROLE_BADGE_COLORS: Record<CanvasTextRole, string> = {
+  general: "#e5e7eb",
+  article: "#34d399",
+  novel_setup: "#fbbf24",
+  novel_outline: "#a78bfa",
+  novel_chapter_outline: "#f472b6",
+  novel_chapter: "#fb7185",
+  character: "#f59e0b",
+  script: "#c084fc",
+  storyboard: "#4ade80",
+  prompt: "#facc15",
+};
+
+function getTextNodeBadge(element: CanvasTextElement): CanvasNodeBadge {
+  const role = getCanvasTextRole(element.textRole);
+  const config = getCanvasTextRoleConfig(role);
+
+  return {
+    title: element.meta?.title || config.title,
+    color: TEXT_ROLE_BADGE_COLORS[role],
+  };
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return (
@@ -211,6 +285,108 @@ function isEditableTarget(target: EventTarget | null): boolean {
     target.tagName === "TEXTAREA" ||
     target.isContentEditable
   );
+}
+
+function mergeElementsWithUpdates(params: {
+  currentElements: CanvasElement[];
+  plannedElements: CanvasElement[];
+  updatesById?: Map<string, Partial<CanvasElement>>;
+}): CanvasElement[] {
+  const plannedById = new Map(
+    params.plannedElements.map((element) => [element.id, element]),
+  );
+  const updatesById = params.updatesById || new Map<string, Partial<CanvasElement>>();
+  const currentIds = new Set(params.currentElements.map((element) => element.id));
+  const merged = params.currentElements.map((element) =>
+    updatesById.has(element.id)
+      ? ({ ...element, ...updatesById.get(element.id) } as CanvasElement)
+      : element,
+  );
+
+  params.plannedElements.forEach((plannedElement) => {
+    if (currentIds.has(plannedElement.id)) return;
+    merged.push({
+      ...plannedElement,
+      ...(updatesById.get(plannedElement.id) || {}),
+    } as CanvasElement);
+  });
+
+  return merged.filter((element) => plannedById.has(element.id) || currentIds.has(element.id));
+}
+
+function createCanvasAgentRunId(): string {
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getNextTextResultVersion(params: {
+  elements: CanvasElement[];
+  sourceId: string;
+  resultTextRole: CanvasTextRole;
+}): number {
+  const versions = params.elements
+    .filter((element): element is CanvasTextElement => element.kind === "text")
+    .filter(
+      (element) =>
+        element.meta?.sourceNodeId === params.sourceId &&
+        getCanvasTextRole(element.textRole) === params.resultTextRole,
+    )
+    .map((element) => element.meta?.version || 1);
+
+  return versions.length > 0 ? Math.max(...versions) + 1 : 1;
+}
+
+function getNextTextChapterNo(params: {
+  source: CanvasElement;
+  resultTextRole: CanvasTextRole;
+  instruction: string;
+}): number | undefined {
+  if (
+    params.resultTextRole !== "novel_chapter" &&
+    params.resultTextRole !== "novel_chapter_outline"
+  ) {
+    return undefined;
+  }
+  if (params.source.kind !== "text") return undefined;
+
+  const sourceChapterNo = params.source.meta?.chapterNo;
+  if (/下一章|下章|next chapter/i.test(params.instruction)) {
+    return typeof sourceChapterNo === "number" ? sourceChapterNo + 1 : undefined;
+  }
+  if (typeof sourceChapterNo === "number") return sourceChapterNo;
+  return 1;
+}
+
+function getCanvasTextResultSiblingSlot(index: number): number {
+  if (index === 0) return 0;
+  const magnitude = Math.ceil(index / 2);
+  return index % 2 === 1 ? magnitude : -magnitude;
+}
+
+function getCanvasHierarchicalTextResultPosition(params: {
+  elements: CanvasElement[];
+  edges: CanvasEdge[];
+  source: CanvasElement;
+}): { x: number; y: number } {
+  const directChildIds = new Set(
+    params.edges
+      .filter((edge) => edge.sourceId === params.source.id)
+      .map((edge) => edge.targetId),
+  );
+  const childCount = params.elements.filter(
+    (element): element is CanvasTextElement =>
+      element.kind === "text" &&
+      element.id !== params.source.id &&
+      (element.meta?.parentNodeId === params.source.id ||
+        element.meta?.sourceNodeId === params.source.id ||
+        directChildIds.has(element.id)),
+  ).length;
+  const slot = getCanvasTextResultSiblingSlot(childCount);
+  const verticalStep = Math.max(params.source.height, DEFAULT_NODE_HEIGHT) + 88;
+
+  return {
+    x: params.source.x + params.source.width + 360,
+    y: params.source.y + params.source.height / 2 + slot * verticalStep,
+  };
 }
 
 export function FreeCanvas() {
@@ -231,7 +407,6 @@ export function FreeCanvas() {
     beginElementDrag,
     clearCanvas,
     commitCanvas,
-    commitElements,
     deleteEdge,
     deleteElement,
     draftEdge,
@@ -271,6 +446,12 @@ export function FreeCanvas() {
   const [aiLoading, setAiLoading] = useState(false);
   const [brainModelRef, setBrainModelRef] = useState("");
   const [brainAttachmentIds, setBrainAttachmentIds] = useState<string[]>([]);
+  const [nodeContextMenu, setNodeContextMenu] =
+    useState<CanvasNodeContextMenuState>(null);
+  const [previewTextElementId, setPreviewTextElementId] = useState<string | null>(null);
+  const [pendingTextSourceIds, setPendingTextSourceIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([
     {
       id: getMessageId(),
@@ -278,22 +459,34 @@ export function FreeCanvas() {
       content: "我是画布大脑。可以选择素材、协调上下文，并把你的意图转成画布操作。",
     },
   ]);
-  const selectedElement =
-    selectedId !== null
-      ? elements.find((element) => element.id === selectedId) || null
+  const {
+    elementById,
+    frameSequenceOverlayElements,
+    processorOverlayElements,
+    visibleEdges,
+    visibleElements,
+  } = useCanvasRenderWindow({
+    elements,
+    edges,
+    viewport,
+    size,
+    selectedId,
+    selectedEdgeId,
+    hoveredId,
+    draggingElementId,
+    draftSourceId: draftEdge?.sourceId,
+  });
+  const selectedElement = selectedId ? elementById.get(selectedId) || null : null;
+  const contextMenuElement = nodeContextMenu
+    ? elementById.get(nodeContextMenu.elementId) || null
+    : null;
+  const previewTextElement =
+    previewTextElementId && elementById.get(previewTextElementId)?.kind === "text"
+      ? (elementById.get(previewTextElementId) as CanvasTextElement)
       : null;
-  const selectedElementActions = selectedElement
-    ? getCanvasActionsForElement(selectedElement)
-    : [];
   const selectedElementIsGenerating = selectedElement?.status === "generating";
   const selectedEditorFrame = selectedElement
     ? getCanvasNodeEditorFrame(selectedElement, viewport, size)
-    : null;
-  const selectedToolbarFrame = selectedElement
-    ? {
-        left: viewport.x + (selectedElement.x + selectedElement.width / 2) * viewport.scale,
-        top: Math.max(16, viewport.y + selectedElement.y * viewport.scale - 64),
-      }
     : null;
   const {
     brainModelOptions,
@@ -347,6 +540,55 @@ export function FreeCanvas() {
     }, 120);
   }, []);
 
+  const closeNodeContextMenu = useCallback(() => {
+    setNodeContextMenu(null);
+  }, []);
+
+  const openNodeContextMenu = useCallback(
+    (elementId: string, event: KonvaEventObject<MouseEvent>) => {
+      event.evt.preventDefault();
+      event.cancelBubble = true;
+      setSelectedId(elementId);
+      setSelectedEdgeId(null);
+      setNodeContextMenu({
+        elementId,
+        x: event.evt.clientX,
+        y: event.evt.clientY,
+      });
+    },
+    [setSelectedEdgeId, setSelectedId],
+  );
+
+  const openNodeDomContextMenu = useCallback(
+    (elementId: string, event: ReactMouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedId(elementId);
+      setSelectedEdgeId(null);
+      setNodeContextMenu({
+        elementId,
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    [setSelectedEdgeId, setSelectedId],
+  );
+
+  const deleteNodeFromContextMenu = useCallback(() => {
+    if (!nodeContextMenu) return;
+    deleteElement(nodeContextMenu.elementId);
+    setPreviewTextElementId((current) =>
+      current === nodeContextMenu.elementId ? null : current,
+    );
+    setNodeContextMenu(null);
+  }, [deleteElement, nodeContextMenu]);
+
+  const openTextPreview = useCallback((element: CanvasTextElement) => {
+    if (element.status === "generating") return;
+    setPreviewTextElementId(element.id);
+    setNodeContextMenu(null);
+  }, []);
+
   const worldCenter = useCallback(() => {
     return {
       x: (size.width / 2 - viewport.x) / viewport.scale,
@@ -357,6 +599,11 @@ export function FreeCanvas() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
+
+      if (event.key === "Escape") {
+        setNodeContextMenu(null);
+        return;
+      }
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
@@ -375,12 +622,14 @@ export function FreeCanvas() {
       if ((event.key === "Backspace" || event.key === "Delete") && selectedEdgeId) {
         event.preventDefault();
         deleteEdge(selectedEdgeId);
+        setNodeContextMenu(null);
         return;
       }
 
       if ((event.key === "Backspace" || event.key === "Delete") && selectedId) {
         event.preventDefault();
         deleteElement(selectedId);
+        setNodeContextMenu(null);
       }
     };
 
@@ -388,9 +637,9 @@ export function FreeCanvas() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteEdge, deleteElement, redo, selectedEdgeId, selectedId, undo]);
 
-  const addText = useCallback(() => {
+  const addTextRole = useCallback((textRole: CanvasTextRole = "general") => {
     const center = worldCenter();
-    const element = createTextElement(center);
+    const element = createTextElement(center, { textRole });
     const size = getTextNodeSize(element.text, element.fontSize);
     addElement({
       ...element,
@@ -451,6 +700,7 @@ export function FreeCanvas() {
   const handleWheel = useCallback(
     (event: KonvaEventObject<WheelEvent>) => {
       event.evt.preventDefault();
+      closeNodeContextMenu();
       const stage = stageRef.current;
       const pointer = stage?.getPointerPosition();
       if (!pointer) return;
@@ -474,7 +724,7 @@ export function FreeCanvas() {
         scale: nextScale,
       });
     },
-    [viewport],
+    [closeNodeContextMenu, viewport],
   );
 
   const setCanvasScale = useCallback(
@@ -504,6 +754,7 @@ export function FreeCanvas() {
 
   const handleStagePointerDown = useCallback(
     (event: KonvaEventObject<MouseEvent>) => {
+      closeNodeContextMenu();
       if (!isPanTarget(event.target)) return;
       const pointer = stageRef.current?.getPointerPosition();
       if (!pointer) return;
@@ -525,6 +776,7 @@ export function FreeCanvas() {
       setSelectedEdgeId,
       setSelectedId,
       viewport,
+      closeNodeContextMenu,
     ],
   );
 
@@ -865,17 +1117,110 @@ export function FreeCanvas() {
         const modelRef = modelEntry?.ref || "";
 
         if (!modelRef || !modelEntry?.model || !modelEntry.provider) {
-          appendAiMessage("assistant", "请先配置可用的文本模型。");
+          const message = "未配置可用文本模型，请先在模型设置中启用一个文本模型。";
+          patchElementDraft(element.id, {
+            status: "failed",
+            error: message,
+          } as Partial<CanvasElement>);
+          appendAiMessage("assistant", message);
           return;
         }
 
-        patchElementDraft(element.id, {
-          status: "generating",
-          error: undefined,
-          modelRef,
-        } as Partial<CanvasElement>);
+        const shouldCreatePendingTextResult =
+          options?.intentOverride?.outputKind === "text" &&
+          options.intentOverride.placement === "create_result";
+        const pendingTextRole =
+          options?.resultTextRole ||
+          (element.kind === "text"
+            ? getCanvasTextRole(element.textRole)
+            : "general");
+        const pendingTextVersion = shouldCreatePendingTextResult
+          ? getNextTextResultVersion({
+              elements: workingElements,
+              sourceId: element.id,
+              resultTextRole: pendingTextRole,
+            })
+          : undefined;
+        const pendingTextRoleConfig = getCanvasTextRoleConfig(pendingTextRole);
+        const pendingSourceRole =
+          element.kind === "text" ? getCanvasTextRole(element.textRole) : undefined;
+        const pendingTextPrompt =
+          options?.intentOverride?.instruction || prompt;
+        const pendingTextTitle =
+          pendingTextRole === "character" && options?.actionLabel
+            ? options.actionLabel
+            : pendingTextRoleConfig.title;
+        const pendingTextBaseMeta: CanvasTextMeta | undefined =
+          shouldCreatePendingTextResult
+            ? {
+                title:
+                  pendingTextVersion && pendingTextVersion > 1
+                    ? `${pendingTextTitle} v${pendingTextVersion}`
+                    : pendingTextTitle,
+                chapterNo: getNextTextChapterNo({
+                  source: element,
+                  resultTextRole: pendingTextRole,
+                  instruction: pendingTextPrompt,
+                }),
+                version: pendingTextVersion,
+                sourceNodeId: element.id,
+                sourceRole: pendingSourceRole,
+                parentNodeId: element.id,
+                sourceRunId: createCanvasAgentRunId(),
+              }
+            : undefined;
+        const pendingTextResultNode = shouldCreatePendingTextResult
+          ? ({
+              ...createTextResultNode({
+                source: element,
+                text: "",
+                prompt: pendingTextPrompt,
+                modelRef,
+                position: getCanvasHierarchicalTextResultPosition({
+                  elements: workingElements,
+                  edges: workingEdges,
+                  source: element,
+                }),
+                textRole: pendingTextRole,
+                meta: pendingTextBaseMeta,
+              }),
+              status: "generating",
+            } satisfies CanvasTextElement)
+          : null;
+        const pendingTextSourceId = pendingTextResultNode ? element.id : null;
+
+        if (pendingTextResultNode) {
+          setPendingTextSourceIds((current) => {
+            const next = new Set(current);
+            next.add(element.id);
+            return next;
+          });
+          commitCanvas((current) =>
+            appendResultNodeFromSources({
+              elements: mergeElementsWithUpdates({
+                currentElements: current.elements,
+                plannedElements: workingElements,
+              }),
+              edges: current.edges,
+              sources: [element],
+              result: pendingTextResultNode,
+            }),
+          );
+        } else {
+          patchElementDraft(element.id, {
+            status: "generating",
+            error: undefined,
+            modelRef,
+          } as Partial<CanvasElement>);
+        }
 
         try {
+          appendAiMessage(
+            "assistant",
+            getCanvasBrainTextGeneratingMessage({
+              generationMode: options?.generationMode,
+            }),
+          );
           const execution = await executeCanvasBrainTextNode({
             prompt,
             element,
@@ -883,13 +1228,35 @@ export function FreeCanvas() {
             provider: modelEntry.provider,
             model: modelEntry.model,
             intentOverride: options?.intentOverride,
+            resultTextRole: options?.resultTextRole,
+            generationMode: options?.generationMode,
           });
 
           if (execution.kind === "empty-material") {
-            patchElementDraft(element.id, {
-              status: "failed",
-              error: "当前节点没有可用于生成的素材内容。",
-            } as Partial<CanvasElement>);
+            const errorMessage = "当前节点没有可用于生成的素材内容。";
+            const updates = new Map<string, Partial<CanvasElement>>([
+              [
+                element.id,
+                {
+                  status: "failed",
+                  error: errorMessage,
+                } as Partial<CanvasElement>,
+              ],
+            ]);
+            if (pendingTextResultNode) {
+              updates.set(pendingTextResultNode.id, {
+                status: "failed",
+                error: errorMessage,
+              } as Partial<CanvasElement>);
+            }
+            commitCanvas((current) => ({
+              elements: mergeElementsWithUpdates({
+                currentElements: current.elements,
+                plannedElements: workingElements,
+                updatesById: updates,
+              }),
+              edges: current.edges,
+            }));
             appendAiMessage("assistant", execution.message);
             return;
           }
@@ -917,18 +1284,21 @@ export function FreeCanvas() {
               prompt: execution.visiblePrompt,
               modelRef: outputModelEntry.ref,
             });
-            const next = appendResultNodeFromSources({
-              elements: workingElements.map((entry) =>
-                entry.id === element.id
-                  ? ({ ...entry, ...getCanvasBrainReadyElementPatch(modelRef) } as CanvasElement)
-                  : entry,
-              ),
-              edges: workingEdges,
-              sources: [element, ...sourceElements],
-              result: resultNode,
-            });
 
-            commitCanvas(next);
+            commitCanvas((current) =>
+              appendResultNodeFromSources({
+                elements: mergeElementsWithUpdates({
+                  currentElements: current.elements,
+                  plannedElements: workingElements,
+                  updatesById: new Map([
+                    [element.id, getCanvasBrainReadyElementPatch(modelRef)],
+                  ]),
+                }),
+                edges: current.edges,
+                sources: [element, ...sourceElements],
+                result: resultNode,
+              }),
+            );
             setSelectedId(resultNode.id);
 
             if (intent.outputKind === "image") {
@@ -1032,48 +1402,176 @@ export function FreeCanvas() {
           }
 
           if (execution.shouldUpdateCurrent) {
-            commitElements(
-              workingElements.map((entry) =>
-                entry.id === element.id
-                  ? ({
-                      ...entry,
+            const previousText = element.kind === "text" ? element.text : "";
+            const previousRevisions =
+              element.kind === "text" ? element.meta?.revisions || [] : [];
+            const shouldSaveRevision =
+              element.kind === "text" &&
+              previousText.trim().length > 0 &&
+              previousText !== execution.content;
+            const nextTextMeta =
+              element.kind === "text"
+                ? {
+                    ...(element.meta || {}),
+                    ...(execution.meta || {}),
+                    revisions: shouldSaveRevision
+                      ? [
+                          {
+                            id: `rev_${Date.now()}`,
+                            text: previousText,
+                            createdAt: new Date().toISOString(),
+                            label: options?.actionLabel
+                              ? `${options.actionLabel}前`
+                              : "上一版",
+                            modelRef,
+                          },
+                          ...previousRevisions,
+                        ].slice(0, 8)
+                      : previousRevisions,
+                  }
+                : execution.meta;
+
+            commitCanvas((current) => ({
+              elements: mergeElementsWithUpdates({
+                currentElements: current.elements,
+                plannedElements: workingElements,
+                updatesById: new Map([
+                  [
+                    element.id,
+                    {
                       text: execution.content,
+                      meta: nextTextMeta,
                       ...getCanvasBrainReadyElementPatch(modelRef),
-                    } as CanvasElement)
-                  : entry,
-              ),
-            );
+                    },
+                  ],
+                ]),
+              }),
+              edges: current.edges,
+            }));
             appendAiMessage("assistant", getCanvasBrainTextDoneMessage(false));
             return;
           }
 
+          if (pendingTextResultNode) {
+            commitCanvas((current) => ({
+              elements: mergeElementsWithUpdates({
+                currentElements: current.elements,
+                plannedElements: workingElements,
+                updatesById: new Map([
+                  [element.id, getCanvasBrainReadyElementPatch(modelRef)],
+                  [
+                    pendingTextResultNode.id,
+                    {
+                      text: execution.content,
+                      meta: {
+                        ...(pendingTextBaseMeta || {}),
+                        ...(execution.meta || {}),
+                        title:
+                          execution.meta?.title ||
+                          pendingTextBaseMeta?.title ||
+                          pendingTextRoleConfig.title,
+                      },
+                      status: "done",
+                      error: undefined,
+                    } as Partial<CanvasElement>,
+                  ],
+                ]),
+              }),
+              edges: current.edges,
+            }));
+            setSelectedId(pendingTextResultNode.id);
+            appendAiMessage("assistant", getCanvasBrainTextDoneMessage(true));
+            return;
+          }
+
+          const resultTextRole = pendingTextRole;
+          const resultVersion = getNextTextResultVersion({
+            elements: workingElements,
+            sourceId: element.id,
+            resultTextRole,
+          });
+          const resultRoleConfig = getCanvasTextRoleConfig(resultTextRole);
+          const sourceRole = pendingSourceRole;
           const resultNode = createTextResultNode({
             source: element,
             text: execution.content,
             prompt: execution.intent.instruction || prompt,
             modelRef,
+            position: getCanvasHierarchicalTextResultPosition({
+              elements: workingElements,
+              edges: workingEdges,
+              source: element,
+            }),
+            textRole: resultTextRole,
+            meta: {
+              ...(execution.meta || {}),
+              title:
+                execution.meta?.title ||
+                (resultVersion > 1
+                  ? `${resultRoleConfig.title} v${resultVersion}`
+                  : resultRoleConfig.title),
+              chapterNo: getNextTextChapterNo({
+                source: element,
+                resultTextRole,
+                instruction: execution.intent.instruction || prompt,
+              }),
+              version: resultVersion,
+              sourceNodeId: element.id,
+              sourceRole,
+              parentNodeId: element.id,
+              sourceRunId: createCanvasAgentRunId(),
+            },
           });
-          const next = appendResultNodeFromSources({
-            elements: workingElements.map((entry) =>
-              entry.id === element.id
-                ? ({ ...entry, ...getCanvasBrainReadyElementPatch(modelRef) } as CanvasElement)
-                : entry,
-            ),
-            edges: workingEdges,
-            sources: [element, ...sourceElements],
-            result: resultNode,
-          });
-
-          commitCanvas(next);
+          commitCanvas((current) =>
+            appendResultNodeFromSources({
+              elements: mergeElementsWithUpdates({
+                currentElements: current.elements,
+                plannedElements: workingElements,
+                updatesById: new Map([
+                  [element.id, getCanvasBrainReadyElementPatch(modelRef)],
+                ]),
+              }),
+              edges: current.edges,
+              sources: [element],
+              result: resultNode,
+            }),
+          );
           setSelectedId(resultNode.id);
           appendAiMessage("assistant", getCanvasBrainTextDoneMessage(true));
         } catch (error) {
           const message = error instanceof Error ? error.message : "文本生成失败";
-          patchElementDraft(element.id, {
-            status: "failed",
-            error: message,
-          } as Partial<CanvasElement>);
+          const updates = new Map<string, Partial<CanvasElement>>([
+            [
+              element.id,
+              {
+                status: "failed",
+                error: message,
+              } as Partial<CanvasElement>,
+            ],
+          ]);
+          if (pendingTextResultNode) {
+            updates.set(pendingTextResultNode.id, {
+              status: "failed",
+              error: message,
+            } as Partial<CanvasElement>);
+          }
+          commitCanvas((current) => ({
+            elements: mergeElementsWithUpdates({
+              currentElements: current.elements,
+              plannedElements: workingElements,
+              updatesById: updates,
+            }),
+            edges: current.edges,
+          }));
           appendAiMessage("assistant", message);
+        } finally {
+          if (pendingTextSourceId) {
+            setPendingTextSourceIds((current) => {
+              const next = new Set(current);
+              next.delete(pendingTextSourceId);
+              return next;
+            });
+          }
         }
         return;
       }
@@ -1083,7 +1581,12 @@ export function FreeCanvas() {
       const modelRef = modelEntry?.ref || "";
 
       if (!modelRef || !modelEntry?.model || !modelEntry.provider) {
-        appendAiMessage("assistant", `请先为${getCanvasNodeEditorTitle(element)}节点配置或选择模型。`);
+        const message = `当前节点没有可用模型，请先为${getCanvasNodeEditorTitle(element)}节点配置或选择模型。`;
+        patchElementDraft(element.id, {
+          status: "failed",
+          error: message,
+        } as Partial<CanvasElement>);
+        appendAiMessage("assistant", message);
         return;
       }
       const mediaSourceElements = resolveCanvasExecutionSources({
@@ -1104,7 +1607,14 @@ export function FreeCanvas() {
           : element;
 
         if (shouldCreateResult) {
-          commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
+          commitCanvas((current) =>
+            appendResultNode({
+              elements: current.elements,
+              edges: current.edges,
+              source: element,
+              result: resultNode,
+            }),
+          );
           setSelectedId(resultNode.id);
         } else {
           patchElementDraft(element.id, {
@@ -1177,7 +1687,14 @@ export function FreeCanvas() {
           : element;
 
         if (shouldCreateResult) {
-          commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
+          commitCanvas((current) =>
+            appendResultNode({
+              elements: current.elements,
+              edges: current.edges,
+              source: element,
+              result: resultNode,
+            }),
+          );
           setSelectedId(resultNode.id);
         } else {
           patchElementDraft(element.id, {
@@ -1239,7 +1756,14 @@ export function FreeCanvas() {
           prompt,
           modelRef,
         });
-        commitCanvas(appendResultNode({ elements, edges, source: element, result: resultNode }));
+        commitCanvas((current) =>
+          appendResultNode({
+            elements: current.elements,
+            edges: current.edges,
+            source: element,
+            result: resultNode,
+          }),
+        );
         setSelectedId(resultNode.id);
         appendAiMessage("assistant", "我已经准备好一个新的音频素材位置。");
         return;
@@ -1252,7 +1776,6 @@ export function FreeCanvas() {
     [
       appendAiMessage,
       commitCanvas,
-      commitElements,
       edges,
       elements,
       getModelEntryForKind,
@@ -1263,7 +1786,7 @@ export function FreeCanvas() {
     ],
   );
 
-  const { runAction, runProcessor } = useCanvasActionRunner({
+  const { runProcessor } = useCanvasActionRunner({
     elements,
     edges,
     commitCanvas,
@@ -1283,29 +1806,34 @@ export function FreeCanvas() {
   const updateSequenceTemplateProps = useCallback(
     (sourceElement: CanvasTemplateElement, nextProps: Record<string, unknown>) => {
       const jobId = typeof nextProps["jobId"] === "string" ? nextProps["jobId"] : undefined;
-      const nextElements = elements.map((element) => {
-        if (element.kind !== "template") return element;
-        if (
-          element.id !== sourceElement.id &&
-          (!jobId ||
-            element.props?.["jobId"] !== jobId ||
-            (element.templateId !== "sequence-viewer" && element.templateId !== "frame-sequence-list"))
-        ) {
-          return element;
-        }
+      commitCanvas((current) => {
+        const nextElements = current.elements.map((element) => {
+          if (element.kind !== "template") return element;
+          if (
+            element.id !== sourceElement.id &&
+            (!jobId ||
+              element.props?.["jobId"] !== jobId ||
+              (element.templateId !== "sequence-viewer" && element.templateId !== "frame-sequence-list"))
+          ) {
+            return element;
+          }
+
+          return {
+            ...element,
+            props: {
+              ...(element.props || {}),
+              ...nextProps,
+            },
+          } as CanvasElement;
+        });
 
         return {
-          ...element,
-          props: {
-            ...(element.props || {}),
-            ...nextProps,
-          },
-        } as CanvasElement;
+          elements: nextElements,
+          edges: current.edges,
+        };
       });
-
-      commitElements(nextElements);
     },
-    [commitElements, elements],
+    [commitCanvas],
   );
 
   useEffect(() => {
@@ -1400,10 +1928,13 @@ export function FreeCanvas() {
         const preparedAction = brainResult.action;
 
         if (preparedAction.createdSourceElements.length > 0) {
-          commitCanvas({
-            elements: preparedAction.elements,
-            edges,
-          });
+          commitCanvas((current) => ({
+            elements: mergeElementsWithUpdates({
+              currentElements: current.elements,
+              plannedElements: preparedAction.elements,
+            }),
+            edges: current.edges,
+          }));
         }
 
         plannedElements = preparedAction.elements;
@@ -1491,11 +2022,11 @@ export function FreeCanvas() {
             fill="rgba(255,255,255,0.001)"
           />
 
-          {edges.map((edge) => (
-            <CanvasEdgeNode
+          {visibleEdges.map(({ edge, source, target }) => (
+            <MemoCanvasEdgeNode
               key={edge.id}
-              edge={edge}
-              elements={elements}
+              source={source}
+              target={target}
               selected={edge.id === selectedEdgeId}
               onSelect={() => {
                 setSelectedEdgeId(edge.id);
@@ -1507,8 +2038,8 @@ export function FreeCanvas() {
 
           {draftEdge && <DraftEdgeNode edge={draftEdge} />}
 
-          {elements.map((element) => (
-            <CanvasElementNode
+          {visibleElements.map((element) => (
+            <MemoCanvasElementNode
               key={element.id}
               element={element}
               selected={element.id === selectedId || element.id === draftEdge?.sourceId}
@@ -1518,6 +2049,7 @@ export function FreeCanvas() {
               }}
               onHover={() => setNodeHover(element.id)}
               onLeave={() => clearNodeHover(element.id)}
+              onContextMenu={(event) => openNodeContextMenu(element.id, event)}
               dragging={element.id === draggingElementId}
               onDragStart={() => beginElementDrag(element.id)}
               onPreviewChange={(updates) => previewUpdateElement(element.id, updates)}
@@ -1525,10 +2057,11 @@ export function FreeCanvas() {
               onUploadImage={requestImageUpload}
               onUploadVideo={requestVideoUpload}
               onUploadAudio={requestAudioUpload}
+              onPreview={openTextPreview}
             />
           ))}
 
-          {elements.map((element) => {
+          {visibleElements.map((element) => {
             const visible =
               element.id === hoveredId ||
               element.id === selectedId ||
@@ -1549,8 +2082,7 @@ export function FreeCanvas() {
         </Layer>
       </Stage>
 
-      {elements.map((element) =>
-        element.kind === "processor" ? (
+      {processorOverlayElements.map((element) => (
           <CanvasProcessorNodeOverlay
             key={`processor_overlay_${element.id}`}
             element={element}
@@ -1564,11 +2096,9 @@ export function FreeCanvas() {
             }
             onRun={(config) => void runProcessor(element, config)}
           />
-        ) : null,
-      )}
+      ))}
 
-      {elements.map((element) =>
-        element.kind === "template" && element.templateId === "frame-sequence-list" ? (
+      {frameSequenceOverlayElements.map((element) => (
           <CanvasSequenceTemplateOverlay
             key={`sequence_overlay_${element.id}`}
             element={element}
@@ -1586,16 +2116,7 @@ export function FreeCanvas() {
             }
             onMessage={(message) => appendAiMessage("assistant", message)}
           />
-        ) : null,
-      )}
-
-      {selectedElement && selectedToolbarFrame && (
-        <CanvasNodeActionToolbar
-          frame={selectedToolbarFrame}
-          actions={selectedElementActions}
-          onAction={(action) => void runAction(action, selectedElement)}
-        />
-      )}
+      ))}
 
       {selectedElement && selectedElement.kind !== "processor" && selectedEditorFrame && (
         <CanvasNodeEditorPanel
@@ -1612,13 +2133,107 @@ export function FreeCanvas() {
           onModelChange={(modelRef) =>
             patchElementDraft(selectedElement.id, { modelRef })
           }
-          onGenerate={() => void generateFromSelectedNode(selectedElement)}
-          onDelete={() => deleteElement(selectedElement.id)}
+          onRestorePreviousText={
+            selectedElement.kind === "text"
+              ? () => {
+                  const [previousRevision, ...remainingRevisions] =
+                    selectedElement.meta?.revisions || [];
+                  if (!previousRevision) return;
+
+                  patchElementDraft(selectedElement.id, {
+                    text: previousRevision.text,
+                    status: "done",
+                    error: undefined,
+                    meta: {
+                      ...(selectedElement.meta || {}),
+                      revisions: remainingRevisions,
+                    },
+                  } as Partial<CanvasElement>);
+              }
+              : undefined
+          }
+          onOpenPreview={
+            selectedElement.kind === "text"
+              ? () => openTextPreview(selectedElement)
+              : undefined
+          }
+          disabled={pendingTextSourceIds.has(selectedElement.id)}
+          onContextMenu={
+            selectedElement.status === "generating"
+              ? undefined
+              : (event) => openNodeDomContextMenu(selectedElement.id, event)
+          }
+          onGenerate={(options?: CanvasNodeGenerateOptions) => {
+            const instruction = options?.instruction?.trim();
+            const elementForGeneration =
+              selectedElement.kind === "text" && options?.sourceText !== undefined
+                ? {
+                    ...selectedElement,
+                    text: options.sourceText,
+                  }
+                : selectedElement;
+            const baseElements =
+              selectedElement.kind === "text" && options?.sourceText !== undefined
+                ? elements.map((element) =>
+                    element.id === selectedElement.id
+                      ? ({
+                          ...element,
+                          text: options.sourceText,
+                        } as CanvasElement)
+                      : element,
+                  )
+                : undefined;
+            const executionOptions =
+                  selectedElement.kind === "text" && instruction && options?.placement
+                ? {
+                    baseElements,
+                    resultTextRole: options.resultTextRole,
+                    generationMode: options.generationMode,
+                    actionLabel: options.actionLabel,
+                    intentOverride: {
+                      outputKind: "text" as const,
+                      placement: options.placement,
+                      instruction,
+                    },
+                  }
+                : undefined;
+
+            void generateFromSelectedNode(
+              elementForGeneration,
+              instruction || undefined,
+              executionOptions,
+            );
+          }}
+        />
+      )}
+
+      {nodeContextMenu && contextMenuElement && (
+        <CanvasNodeContextMenu
+          x={nodeContextMenu.x}
+          y={nodeContextMenu.y}
+          viewportWidth={size.width}
+          viewportHeight={size.height}
+          title={getCanvasNodeEditorTitle(contextMenuElement)}
+          canPreview={contextMenuElement.kind === "text"}
+          onPreview={
+            contextMenuElement.kind === "text"
+              ? () => openTextPreview(contextMenuElement)
+              : undefined
+          }
+          onDelete={deleteNodeFromContextMenu}
+          onClose={closeNodeContextMenu}
+        />
+      )}
+
+      {previewTextElement && (
+        <CanvasTextPreviewModal
+          element={previewTextElement}
+          onClose={() => setPreviewTextElementId(null)}
         />
       )}
 
       <CanvasSideToolbar
-        onAddText={addText}
+        onAddTextRole={addTextRole}
         onAddImage={addImagePlaceholder}
         onAddVideo={addVideoPlaceholder}
         onAddAudio={addAudioPlaceholder}
@@ -1738,6 +2353,135 @@ export function FreeCanvas() {
   );
 }
 
+function CanvasNodeContextMenu({
+  x,
+  y,
+  viewportWidth,
+  viewportHeight,
+  title,
+  canPreview,
+  onPreview,
+  onDelete,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  title: string;
+  canPreview?: boolean;
+  onPreview?: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const menuWidth = 184;
+  const menuHeight = canPreview ? 140 : 96;
+  const left = Math.min(Math.max(8, x), Math.max(8, viewportWidth - menuWidth - 8));
+  const top = Math.min(Math.max(8, y), Math.max(8, viewportHeight - menuHeight - 8));
+
+  useEffect(() => {
+    const handlePointerDown = () => onClose();
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed z-[90] w-[184px] overflow-hidden rounded-xl border border-white/[0.1] bg-[#02070b]/[0.94] p-1.5 text-white shadow-[0_24px_70px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-2xl"
+      style={{ left, top }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <div className="truncate px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-white/42">
+        {title}
+      </div>
+      {canPreview && onPreview && (
+        <button
+          type="button"
+          onClick={onPreview}
+          className="flex h-10 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold text-white/78 transition-colors duration-200 hover:bg-white/[0.1] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15"
+        >
+          <Eye className="h-4 w-4 shrink-0" />
+          预览内容
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onDelete}
+        className="flex h-10 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold text-rose-100/90 transition-colors duration-200 hover:bg-rose-400/[0.14] hover:text-rose-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-200/20"
+      >
+        <Trash2 className="h-4 w-4 shrink-0" />
+        删除节点
+      </button>
+    </div>
+  );
+}
+
+function CanvasTextPreviewModal({
+  element,
+  onClose,
+}: {
+  element: CanvasTextElement;
+  onClose: () => void;
+}) {
+  const badge = getTextNodeBadge(element);
+  const content = element.text.trim() || "暂无内容";
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/42 px-5 py-7 backdrop-blur-[6px]"
+      onMouseDown={onClose}
+    >
+      <section
+        className="flex h-[min(480px,calc(100vh-56px))] min-h-[min(400px,calc(100vh-56px))] w-[min(768px,calc(100vw-40px))] min-w-[min(600px,calc(100vw-40px))] flex-col overflow-hidden rounded-[18px] border border-white/[0.1] bg-[#02070b]/[0.96] text-white shadow-[0_28px_80px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(255,255,255,0.07)]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-white/[0.08] px-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_14px_currentColor]"
+              style={{ color: badge.color, backgroundColor: badge.color }}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-semibold text-white/88">
+                {badge.title}
+              </div>
+              <div className="text-[11px] text-white/38">
+                {content.length} 字
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/58 transition-colors duration-200 hover:bg-white/[0.1] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15"
+            aria-label="关闭预览"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 [scrollbar-color:rgba(255,255,255,0.22)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1.5">
+          <article className="mx-auto max-w-[58ch] whitespace-pre-wrap text-[14px] leading-7 text-white/84">
+            {content}
+          </article>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function CanvasElementNode({
   element,
   selected,
@@ -1745,26 +2489,43 @@ function CanvasElementNode({
   onSelect,
   onHover,
   onLeave,
+  onContextMenu,
   onDragStart,
   onPreviewChange,
   onChange,
   onUploadImage,
   onUploadVideo,
   onUploadAudio,
-}: {
-  element: CanvasElement;
-  selected: boolean;
-  dragging: boolean;
-  onSelect: () => void;
-  onHover: () => void;
-  onLeave: () => void;
-  onDragStart: () => void;
-  onPreviewChange: (updates: Partial<CanvasElement>) => void;
-  onChange: (updates: Partial<CanvasElement>) => void;
-  onUploadImage: (element: CanvasImageElement) => void;
-  onUploadVideo: (element: CanvasMediaElement) => void;
-  onUploadAudio: (element: CanvasMediaElement) => void;
-}) {
+  onPreview,
+}: CanvasElementNodeProps) {
+  const dragPreviewFrameRef = useRef<number | null>(null);
+  const dragPreviewUpdatesRef = useRef<Partial<CanvasElement> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (dragPreviewFrameRef.current !== null) {
+        cancelAnimationFrame(dragPreviewFrameRef.current);
+      }
+    };
+  }, []);
+
+  const schedulePreviewChange = useCallback(
+    (updates: Partial<CanvasElement>) => {
+      dragPreviewUpdatesRef.current = updates;
+      if (dragPreviewFrameRef.current !== null) return;
+
+      dragPreviewFrameRef.current = requestAnimationFrame(() => {
+        dragPreviewFrameRef.current = null;
+        const pendingUpdates = dragPreviewUpdatesRef.current;
+        dragPreviewUpdatesRef.current = null;
+        if (pendingUpdates) {
+          onPreviewChange(pendingUpdates);
+        }
+      });
+    },
+    [onPreviewChange],
+  );
+
   const commonProps: CanvasNodeCommonProps = {
     id: element.id,
     x: element.x,
@@ -1773,13 +2534,17 @@ function CanvasElementNode({
     height: element.height,
     rotation: element.rotation,
     draggable: true,
-    onClick: onSelect,
-    onTap: onSelect,
+    onClick: element.status === "generating" ? undefined : onSelect,
+    onTap: element.status === "generating" ? undefined : onSelect,
     onMouseEnter: onHover,
     onMouseLeave: onLeave,
+    onContextMenu:
+      element.status === "generating"
+        ? undefined
+        : onContextMenu,
     onDragStart,
     onDragMove: (event: KonvaEventObject<DragEvent>) => {
-      onPreviewChange({
+      schedulePreviewChange({
         x: event.target.x(),
         y: event.target.y(),
       });
@@ -1792,290 +2557,61 @@ function CanvasElementNode({
     },
   };
 
-  const renderNode = canvasNodeRenderers[element.kind];
-  return renderNode({
-    element,
+  const rendererProps = {
     selected,
     dragging,
     commonProps,
     onUploadImage,
     onUploadVideo,
     onUploadAudio,
-  });
-}
-
-function CanvasConnectionHandle({
-  element,
-  onHover,
-  onLeave,
-  onStartConnection,
-}: {
-  element: CanvasElement;
-  onHover: () => void;
-  onLeave: () => void;
-  onStartConnection: (event: KonvaEventObject<MouseEvent | TouchEvent>) => void;
-}) {
-  const input = getInputPortPosition(element);
-  const output = getOutputPortPosition(element);
-
-  return (
-    <Group listening onMouseEnter={onHover} onMouseLeave={onLeave}>
-      <Circle
-        x={input.x}
-        y={input.y}
-        radius={PORT_RADIUS}
-        fill="rgba(255,255,255,0.96)"
-        stroke="rgba(0,0,0,0.3)"
-        strokeWidth={1}
-        listening={false}
-      />
-      <Circle
-        x={output.x}
-        y={output.y}
-        radius={16}
-        fill="rgba(255,255,255,0.001)"
-        onMouseDown={onStartConnection}
-        onTouchStart={onStartConnection}
-        draggable={false}
-      />
-      <Circle
-        x={output.x}
-        y={output.y}
-        radius={PORT_RADIUS}
-        fill="rgba(255,255,255,0.96)"
-        stroke="rgba(0,0,0,0.3)"
-        strokeWidth={1}
-        onMouseDown={onStartConnection}
-        onTouchStart={onStartConnection}
-        draggable={false}
-      />
-    </Group>
-  );
-}
-
-function CanvasEdgeNode({
-  edge,
-  elements,
-  selected,
-  onSelect,
-  onDelete,
-}: {
-  edge: CanvasEdge;
-  elements: CanvasElement[];
-  selected: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
-}) {
-  const source = elements.find((element) => element.id === edge.sourceId);
-  const target = elements.find((element) => element.id === edge.targetId);
-
-  if (!source || !target) return null;
-
-  const sourcePort = getOutputPortPosition(source);
-  const targetPort = getInputPortPosition(target);
-
-  return (
-    <FlowingConnector
-      from={sourcePort}
-      to={targetPort}
-      opacity={selected ? 0.96 : 0.72}
-      selected={selected}
-      showEndpoints
-      onSelect={onSelect}
-      onDelete={onDelete}
-    />
-  );
-}
-
-function DraftEdgeNode({ edge }: { edge: CanvasDraftEdge }) {
-  return (
-    <FlowingConnector
-      from={edge.from}
-      to={edge.to}
-      opacity={0.9}
-      selected={false}
-      showEndpoints
-    />
-  );
-}
-
-function FlowingConnector({
-  from,
-  to,
-  opacity,
-  selected,
-  showEndpoints,
-  onSelect,
-  onDelete,
-}: {
-  from: { x: number; y: number };
-  to: { x: number; y: number };
-  opacity: number;
-  selected: boolean;
-  showEndpoints: boolean;
-  onSelect?: () => void;
-  onDelete?: () => void;
-}) {
-  const pathRef = useRef<Konva.Path>(null);
-  const midpoint = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2,
-  };
-  const handleSelect = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
-    event.cancelBubble = true;
-    onSelect?.();
-  };
-  const handleDelete = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
-    event.cancelBubble = true;
-    onDelete?.();
   };
 
-  useEffect(() => {
-    const path = pathRef.current;
-    const layer = path?.getLayer();
-    if (!path || !layer) return;
-
-    const animation = new Konva.Animation((frame) => {
-      path.dashOffset(-((frame?.time || 0) / 42));
-    }, layer);
-    animation.start();
-
-    return () => {
-      animation.stop();
-    };
-  }, []);
-
-  return (
-    <Group listening={Boolean(onSelect)}>
-      {onSelect && (
-        <Path
-          data={getConnectorPathData(from, to)}
-          stroke="rgba(255,255,255,0.001)"
-          strokeWidth={16}
-          lineCap="round"
-          lineJoin="round"
-          onMouseDown={handleSelect}
-          onTouchStart={handleSelect}
+  switch (element.kind) {
+    case "text":
+      return (
+        <CanvasTextNode
+          {...rendererProps}
+          element={element}
+          onPreview={() => onPreview(element)}
         />
-      )}
-      <Path
-        ref={pathRef}
-        data={getConnectorPathData(from, to)}
-        stroke={selected ? "rgba(250,204,21,0.95)" : `rgba(255,255,255,${opacity})`}
-        strokeWidth={selected ? 2.4 : 1.6}
-        dash={selected ? [4, 6] : [2, 6]}
-        lineCap="round"
-        lineJoin="round"
-        shadowColor={selected ? "rgba(250,204,21,0.38)" : "rgba(255,255,255,0.22)"}
-        shadowBlur={selected ? 8 : 4}
-        listening={false}
-      />
-      {selected && onDelete && (
-        <Group
-          x={midpoint.x - 13}
-          y={midpoint.y - 13}
-          onMouseDown={handleDelete}
-          onTouchStart={handleDelete}
-        >
-          <Rect
-            width={26}
-            height={26}
-            fill="rgba(8,10,12,0.82)"
-            stroke="rgba(250,204,21,0.48)"
-            strokeWidth={1}
-            cornerRadius={8}
-            shadowColor="rgba(0,0,0,0.42)"
-            shadowBlur={12}
-          />
-          <Text
-            width={26}
-            height={26}
-            text="×"
-            align="center"
-            verticalAlign="middle"
-            fill="rgba(255,255,255,0.86)"
-            fontSize={17}
-            fontStyle="700"
-            listening={false}
-          />
-        </Group>
-      )}
-      {showEndpoints && (
-        <>
-          <Circle
-            x={from.x}
-            y={from.y}
-            radius={PORT_RADIUS}
-            fill="rgba(255,255,255,0.96)"
-            listening={false}
-          />
-          <Circle
-            x={to.x}
-            y={to.y}
-            radius={PORT_RADIUS}
-            fill="rgba(255,255,255,0.96)"
-            listening={false}
-          />
-        </>
-      )}
-    </Group>
-  );
+      );
+    case "shape":
+      return <CanvasShapeNode {...rendererProps} element={element} />;
+    case "image":
+      return <CanvasImageNode {...rendererProps} element={element} />;
+    case "video":
+    case "audio":
+      return <CanvasMediaNode {...rendererProps} element={element} />;
+    case "template":
+      return <CanvasTemplateNode {...rendererProps} element={element} />;
+    case "processor":
+      return <CanvasProcessorNode {...rendererProps} element={element} />;
+    default:
+      return null;
+  }
 }
 
-const canvasNodeRenderers: Record<
-  CanvasElementKind,
-  (props: CanvasNodeRendererProps) => React.ReactNode
-> = {
-  text: (props) => (
-    <CanvasTextNode
-      {...props}
-      element={props.element as CanvasTextElement}
-    />
-  ),
-  shape: (props) => (
-    <CanvasShapeNode
-      {...props}
-      element={props.element as CanvasShapeElement}
-    />
-  ),
-  image: (props) => (
-    <CanvasImageNode
-      {...props}
-      element={props.element as CanvasImageElement}
-    />
-  ),
-  video: (props) => (
-    <CanvasMediaNode
-      {...props}
-      element={props.element as CanvasMediaElement}
-    />
-  ),
-  audio: (props) => (
-    <CanvasMediaNode
-      {...props}
-      element={props.element as CanvasMediaElement}
-    />
-  ),
-  template: (props) => (
-    <CanvasTemplateNode
-      {...props}
-      element={props.element as CanvasTemplateElement}
-    />
-  ),
-  processor: (props) => (
-    <CanvasProcessorNode
-      {...props}
-      element={props.element as CanvasProcessorElement}
-    />
-  ),
-};
+const MemoCanvasElementNode = memo(
+  CanvasElementNode,
+  (previous, next) =>
+    previous.element === next.element &&
+    previous.selected === next.selected &&
+    previous.dragging === next.dragging,
+);
 
 function CanvasTextNode({
   element,
   selected,
   dragging,
   commonProps,
+  onPreview,
 }: CanvasNodeRendererProps<CanvasTextElement>) {
+  const badge = getTextNodeBadge(element);
+  const showGeneratingPreview =
+    element.status === "generating" &&
+    element.text.trim().length === 0 &&
+    Boolean(element.meta?.sourceNodeId);
+
   return (
     <CanvasNodeShell
       commonProps={commonProps}
@@ -2083,22 +2619,121 @@ function CanvasTextNode({
       height={element.height}
       selected={selected}
       dragging={dragging}
+      badge={badge}
+      onDblClick={onPreview}
+      onDblTap={onPreview}
     >
+      {showGeneratingPreview ? (
+        <CanvasTextGeneratingPreview
+          width={element.width}
+          height={element.height}
+          title={badge.title}
+        />
+      ) : element.status === "failed" ? (
+        <Text
+          x={NODE_PADDING + 8}
+          y={NODE_PADDING + 18}
+          width={Math.max(24, element.width - NODE_PADDING * 2 - 16)}
+          text={element.error || "生成失败"}
+          fill="#fecaca"
+          fontSize={14}
+          lineHeight={1.5}
+          fontStyle="600"
+          align="left"
+          verticalAlign="top"
+          wrap="char"
+          ellipsis
+        />
+      ) : !selected && (
+        <Group
+          clipX={NODE_PADDING + 8}
+          clipY={NODE_PADDING + 8}
+          clipWidth={Math.max(24, element.width - NODE_PADDING * 2 - 16)}
+          clipHeight={Math.max(24, element.height - NODE_PADDING * 2 - 16)}
+        >
+          <Text
+            x={NODE_PADDING + 8}
+            y={NODE_PADDING + 8}
+            width={Math.max(24, element.width - NODE_PADDING * 2 - 16)}
+            height={Math.max(24, element.height - NODE_PADDING * 2 - 16)}
+            text={element.text}
+            fill="#f8fafc"
+            fontSize={14}
+            lineHeight={1.45}
+            fontStyle="400"
+            align="left"
+            verticalAlign="top"
+            wrap="char"
+            ellipsis
+          />
+        </Group>
+      )}
+    </CanvasNodeShell>
+  );
+}
+
+function CanvasTextGeneratingPreview({
+  width,
+  height,
+  title,
+}: {
+  width: number;
+  height: number;
+  title: string;
+}) {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTick((current) => (current + 1) % 4);
+    }, 420);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const dots = ".".repeat(tick || 1);
+  const contentWidth = Math.max(24, width - NODE_PADDING * 2 - 16);
+  const lineWidths = [0.82, 0.94, 0.68, 0.88, 0.52];
+
+  return (
+    <Group>
       <Text
         x={NODE_PADDING + 8}
-        y={NODE_PADDING + 8}
-        width={Math.max(24, element.width - NODE_PADDING * 2 - 16)}
-        height={Math.max(24, element.height - NODE_PADDING * 2 - 16)}
-        text={element.text}
-        fill="#f8fafc"
+        y={NODE_PADDING + 14}
+        width={contentWidth}
+        text={`${title}生成中${dots}`}
+        fill="rgba(255,255,255,0.76)"
         fontSize={14}
-        lineHeight={1.35}
-        fontStyle="400"
-        align="left"
-        verticalAlign="top"
-        wrap="word"
+        fontStyle="600"
+        wrap="none"
+        ellipsis
       />
-    </CanvasNodeShell>
+      {lineWidths.map((ratio, index) => {
+        const active = (tick + index) % 4 === 0;
+
+        return (
+          <Rect
+            key={`${ratio}_${index}`}
+            x={NODE_PADDING + 8}
+            y={NODE_PADDING + 52 + index * 25}
+            width={contentWidth * ratio}
+            height={10}
+            fill={active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)"}
+            cornerRadius={5}
+          />
+        );
+      })}
+      <Text
+        x={NODE_PADDING + 8}
+        y={Math.max(NODE_PADDING + 178, height - NODE_PADDING - 42)}
+        width={contentWidth}
+        text="创作组正在处理，请稍等"
+        fill="rgba(255,255,255,0.38)"
+        fontSize={12}
+        wrap="none"
+        ellipsis
+      />
+    </Group>
   );
 }
 
@@ -2812,6 +3447,7 @@ function CanvasNodeShell({
   selected,
   dragging,
   children,
+  badge,
   onDblClick,
   onDblTap,
   onMouseEnter,
@@ -2824,6 +3460,7 @@ function CanvasNodeShell({
   selected: boolean;
   dragging: boolean;
   children: React.ReactNode;
+  badge?: CanvasNodeBadge;
   onDblClick?: () => void;
   onDblTap?: () => void;
   onMouseEnter?: () => void;
@@ -2852,6 +3489,31 @@ function CanvasNodeShell({
       }}
       onMouseMove={() => onMouseMove?.()}
     >
+      {badge && (
+        <Group x={2} y={-24} listening={false}>
+          <Circle
+            x={5}
+            y={10}
+            radius={5}
+            fill={badge.color}
+            shadowColor={badge.color}
+            shadowBlur={8}
+            shadowOpacity={0.4}
+          />
+          <Text
+            x={17}
+            y={3}
+            width={Math.max(80, width - 24)}
+            text={badge.title}
+            fill="rgba(255,255,255,0.74)"
+            fontSize={12}
+            fontStyle="600"
+            wrap="none"
+            ellipsis
+            listening={false}
+          />
+        </Group>
+      )}
       <Rect
         width={width}
         height={height}
@@ -2860,28 +3522,30 @@ function CanvasNodeShell({
         strokeWidth={selected ? 1.5 : 1}
         cornerRadius={NODE_RADIUS}
         shadowColor="rgba(0,0,0,0.45)"
-        shadowBlur={dragging ? 0 : 18}
-        shadowOffsetY={dragging ? 0 : 12}
-        shadowOpacity={dragging ? 0 : 0.35}
+        shadowBlur={selected && !dragging ? 16 : 0}
+        shadowOffsetY={selected && !dragging ? 10 : 0}
+        shadowOpacity={selected && !dragging ? 0.32 : 0}
       />
-      <Rect
-        width={width}
-        height={height}
-        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-        fillRadialGradientStartRadius={0}
-        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={Math.max(width, height) * 1.2}
-        fillRadialGradientColorStops={[
-          0,
-          "rgba(255,255,255,0.04)",
-          0.45,
-          "rgba(255,255,255,0)",
-          1,
-          "rgba(255,255,255,0)",
-        ]}
-        cornerRadius={NODE_RADIUS}
-        listening={false}
-      />
+      {selected && (
+        <Rect
+          width={width}
+          height={height}
+          fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+          fillRadialGradientStartRadius={0}
+          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+          fillRadialGradientEndRadius={Math.max(width, height) * 1.2}
+          fillRadialGradientColorStops={[
+            0,
+            "rgba(255,255,255,0.04)",
+            0.45,
+            "rgba(255,255,255,0)",
+            1,
+            "rgba(255,255,255,0)",
+          ]}
+          cornerRadius={NODE_RADIUS}
+          listening={false}
+        />
+      )}
       <Rect
         x={NODE_RADIUS}
         y={1}

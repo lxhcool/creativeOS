@@ -1,4 +1,8 @@
-import type { CanvasEdge, CanvasElement } from "@/entities/canvas/model/types";
+import type {
+  CanvasEdge,
+  CanvasElement,
+  CanvasTextRole,
+} from "@/entities/canvas/model/types";
 import type { UserModel, UserProvider } from "@/types/provider";
 import type { PreparedCanvasBrainAction } from "./action-context";
 
@@ -21,6 +25,23 @@ export type CanvasTextGenerationParams = {
   provider: UserProvider;
   model: UserModel;
   sources: CanvasTextGenerationSource[];
+};
+
+export type CanvasCollaborativeTextMemory = {
+  title?: string;
+  summary: string;
+  continuityNotes: string[];
+  nextHooks: string[];
+};
+
+export type CanvasCollaborativeTextGenerationParams =
+  CanvasTextGenerationParams & {
+    resultTextRole: CanvasTextRole;
+  };
+
+export type CanvasCollaborativeTextGenerationResult = {
+  content: string;
+  memory?: CanvasCollaborativeTextMemory;
 };
 
 export type CanvasImageGenerationParams = {

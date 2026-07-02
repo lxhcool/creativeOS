@@ -1,4 +1,5 @@
 import type { CanvasElement } from "@/entities/canvas/model/types";
+import { getCanvasTextRole } from "@/entities/canvas/lib/textRoles";
 import type { CanvasTextGenerationSource } from "../model/types";
 
 export function getElementMaterialText(element: CanvasElement): string {
@@ -65,7 +66,10 @@ export function toBrainNodeSummary(element: CanvasElement): {
   const content = getElementMaterialText(element);
   return {
     id: element.id,
-    kind: element.kind,
+    kind:
+      element.kind === "text"
+        ? `text:${getCanvasTextRole(element.textRole)}`
+        : element.kind,
     content: content || undefined,
     hasAsset: hasConcreteAsset(element),
   };
@@ -73,7 +77,10 @@ export function toBrainNodeSummary(element: CanvasElement): {
 
 export function toTextGenerationSource(element: CanvasElement): CanvasTextGenerationSource {
   return {
-    kind: element.kind,
+    kind:
+      element.kind === "text"
+        ? `text:${getCanvasTextRole(element.textRole)}`
+        : element.kind,
     text: element.kind === "text" ? element.text : undefined,
     prompt: element.prompt,
     label:

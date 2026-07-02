@@ -121,6 +121,58 @@ export interface DiscoveredModel {
   maxOutputTokens?: number;
 }
 
+export function inferModelKind(params: {
+  modelName: string;
+  displayName?: string;
+  capabilities?: string[];
+  fallback?: ModelKind;
+}): ModelKind {
+  const name = `${params.modelName} ${params.displayName || ""}`.toLowerCase();
+  const capabilities = params.capabilities || [];
+
+  if (
+    /\b(sora|veo|kling|runway|gen-?3|luma|pika|hailuo)\b/i.test(name) ||
+    /\bvideo\b|text-to-video|image-to-video|i2v|t2v/i.test(name)
+  ) {
+    return "video";
+  }
+
+  if (
+    /gpt-image|dall[-_ ]?e|dalle|imagen|flux|stable[-_ ]?diffusion|sdxl|midjourney|image[-_ ]?gen|text-to-image|t2i/i.test(
+      name,
+    )
+  ) {
+    return "image";
+  }
+
+  if (capabilities.includes("video")) return "video";
+  if (capabilities.includes("image") && !capabilities.includes("text")) {
+    return "image";
+  }
+  if (
+    /\b(claude|deepseek|gpt|gemini|qwen|llama|mistral|yi|glm|doubao|moonshot|kimi)\b/i.test(
+      name,
+    )
+  ) {
+    return "text";
+  }
+
+  return params.fallback || "text";
+}
+
+export function normalizeModelCapabilities(params: {
+  kind: ModelKind;
+  capabilities?: string[];
+}): string[] {
+  if (params.kind === "image") return ["image"];
+  if (params.kind === "video") return ["video"];
+
+  const capabilities = params.capabilities?.filter(Boolean) || [];
+  const next = new Set(capabilities.length > 0 ? capabilities : ["text", "json"]);
+  next.add("text");
+  return Array.from(next);
+}
+
 export function inferProviderSupportedKinds(params: {
   type: ProviderType;
   name?: string;

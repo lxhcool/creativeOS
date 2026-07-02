@@ -1,22 +1,97 @@
 import {
+  BookOpen,
+  Clapperboard,
   FileInput,
+  FileText,
   Image as ImageIcon,
+  ListTree,
   Music,
   Settings,
   Type,
+  UserRound,
   Video,
+  WandSparkles,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import {
+  type FocusEvent,
+  type ReactNode,
+  useState,
+} from "react";
+import type { CanvasTextRole } from "@/entities/canvas/model/types";
+import {
+  getCanvasTextRoleConfig,
+} from "@/entities/canvas/lib/textRoles";
+
+type TextMenuItem = {
+  role: CanvasTextRole;
+  icon: ReactNode;
+  description: string;
+};
+
+const TEXT_MENU_ITEMS: TextMenuItem[] = [
+  {
+    role: "general",
+    icon: <Type className="h-4 w-4" />,
+    description: "素材、草稿、普通文本",
+  },
+  {
+    role: "article",
+    icon: <FileText className="h-4 w-4" />,
+    description: "文章、观点、长内容",
+  },
+  {
+    role: "novel_setup",
+    icon: <BookOpen className="h-4 w-4" />,
+    description: "题材、世界观、主角",
+  },
+  {
+    role: "novel_outline",
+    icon: <ListTree className="h-4 w-4" />,
+    description: "主线、转折、阶段",
+  },
+  {
+    role: "novel_chapter_outline",
+    icon: <ListTree className="h-4 w-4" />,
+    description: "本章目标、冲突、钩子",
+  },
+  {
+    role: "novel_chapter",
+    icon: <BookOpen className="h-4 w-4" />,
+    description: "章节正文、续写",
+  },
+  {
+    role: "character",
+    icon: <UserRound className="h-4 w-4" />,
+    description: "人物卡、关系、弧光",
+  },
+  {
+    role: "script",
+    icon: <Clapperboard className="h-4 w-4" />,
+    description: "场景、动作、对白",
+  },
+  {
+    role: "storyboard",
+    icon: <Clapperboard className="h-4 w-4" />,
+    description: "镜头、画面、时长",
+  },
+  {
+    role: "prompt",
+    icon: <WandSparkles className="h-4 w-4" />,
+    description: "图像/视频生成提示词",
+  },
+];
 
 export function CanvasSideToolbar({
-  onAddText,
+  onAddTextRole,
   onAddImage,
   onAddVideo,
   onAddAudio,
   onImport,
   onOpenApiConfig,
 }: {
-  onAddText: () => void;
+  onAddTextRole: (role: CanvasTextRole) => void;
   onAddImage: () => void;
   onAddVideo: () => void;
   onAddAudio: () => void;
@@ -25,52 +100,206 @@ export function CanvasSideToolbar({
 }) {
   return (
     <aside
-      className="fixed z-20 box-border flex w-[68px] flex-col items-center gap-1.5 overflow-hidden border border-white/10 bg-black/[0.28] p-[6px] text-white shadow-2xl shadow-black/[0.28] backdrop-blur-xl"
+      className="fixed z-20 box-border flex w-[68px] flex-col items-center gap-1 overflow-visible border border-white/10 bg-black/[0.28] p-[6px] text-white shadow-2xl shadow-black/[0.28] backdrop-blur-xl"
       style={{ left: 16, top: 48, borderRadius: 12 }}
     >
-      <ToolButton icon={<Type className="h-4 w-4" />} label="文本" onClick={onAddText} />
+      <Link
+        href="/"
+        className="group flex h-[50px] w-[56px] cursor-pointer items-center justify-center rounded-lg text-white/80 transition duration-200 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15"
+        aria-label="返回首页"
+      >
+        <Image
+          src="/logo.png"
+          alt="CreativeOS"
+          width={30}
+          height={30}
+          className="h-7 w-7 object-contain transition duration-200 group-hover:-translate-y-0.5 group-hover:brightness-125 group-hover:drop-shadow-[0_8px_18px_rgba(47,136,210,0.28)] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+          priority
+        />
+      </Link>
+
+      <ToolbarDivider />
+
+      {/* 创作工具组 */}
+      <TextToolMenu onAddTextRole={onAddTextRole} />
       <ToolButton
-        icon={<ImageIcon className="h-4 w-4" />}
+        icon={<ImageIcon className="h-[18px] w-[18px]" />}
         label="图像"
+        tooltip="添加图像节点"
         onClick={onAddImage}
       />
-      <ToolButton icon={<Video className="h-4 w-4" />} label="视频" onClick={onAddVideo} />
-      <ToolButton icon={<Music className="h-4 w-4" />} label="音乐" onClick={onAddAudio} />
       <ToolButton
-        icon={<FileInput className="h-4 w-4" />}
+        icon={<Video className="h-[18px] w-[18px]" />}
+        label="视频"
+        tooltip="添加视频节点"
+        onClick={onAddVideo}
+      />
+      <ToolButton
+        icon={<Music className="h-[18px] w-[18px]" />}
+        label="音乐"
+        tooltip="添加音频节点"
+        onClick={onAddAudio}
+      />
+
+      <ToolbarDivider />
+
+      {/* 系统工具组 */}
+      <ToolButton
+        icon={<FileInput className="h-[18px] w-[18px]" />}
         label="导入"
+        tooltip="导入画布 JSON"
         onClick={onImport}
       />
       <ToolButton
-        icon={<Settings className="h-4 w-4" />}
+        icon={<Settings className="h-[18px] w-[18px]" />}
         label="API"
+        tooltip="模型与接口配置"
         onClick={onOpenApiConfig}
       />
     </aside>
   );
 }
 
+function ToolbarDivider() {
+  return <div className="my-0.5 h-px w-9 shrink-0 bg-white/[0.08]" />;
+}
+
+function TextToolMenu({
+  onAddTextRole,
+}: {
+  onAddTextRole: (role: CanvasTextRole) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    setOpen(false);
+  };
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocusCapture={() => setOpen(true)}
+      onBlurCapture={handleBlur}
+    >
+      <div
+        className={`relative grid h-[50px] w-[56px] min-w-0 cursor-default flex-col place-items-center gap-1 rounded-lg text-[11px] transition-colors duration-200 ${
+          open ? "bg-white/[0.12] text-white" : "text-white/72"
+        }`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="文本节点（含更多类型）"
+        tabIndex={0}
+      >
+        <Type className="h-[18px] w-[18px] shrink-0" />
+        <span className="max-w-full truncate">文本</span>
+        {/* 右下角小三角：图标工具栏表达“可展开更多”的行业标准 */}
+        <span
+          aria-hidden
+          className={`absolute bottom-[5px] right-[5px] h-0 w-0 border-b-[5px] border-l-[5px] border-b-current border-l-transparent transition-opacity duration-200 ${
+            open ? "opacity-80" : "opacity-35"
+          }`}
+        />
+      </div>
+      {open && <div className="absolute left-full top-0 h-full w-3" />}
+      <div
+        className={`absolute left-[calc(100%+10px)] top-0 w-[238px] transition duration-150 ease-out motion-reduce:transition-none ${
+          open
+            ? "pointer-events-auto translate-x-0 opacity-100"
+            : "pointer-events-none translate-x-1 opacity-0"
+        }`}
+        aria-hidden={!open}
+        role="menu"
+      >
+        <div className="overflow-hidden rounded-xl border border-white/[0.1] bg-[#02070b]/[0.92] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-2xl">
+          <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium text-white/38">
+            文本节点
+          </div>
+          <div className="grid gap-1">
+            {TEXT_MENU_ITEMS.map((item) => {
+              const config = getCanvasTextRoleConfig(item.role);
+
+              return (
+                <button
+                  key={item.role}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={open ? 0 : -1}
+                  onClick={() => onAddTextRole(item.role)}
+                  className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-white/72 transition-colors duration-200 hover:bg-white/[0.1] hover:text-white focus:outline-none focus-visible:bg-white/[0.12] focus-visible:ring-2 focus-visible:ring-white/15"
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/[0.07] text-white/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                    {item.icon}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12px] font-semibold leading-4 text-current">
+                      {config.title}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] leading-4 text-white/42">
+                      {item.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToolButton({
   icon,
   label,
+  tooltip,
   active = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  tooltip?: string;
   active?: boolean;
   onClick: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const tip = tooltip ?? label;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex h-[50px] w-[56px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg text-[11px] transition hover:bg-white/[0.12] hover:text-white ${
-        active ? "bg-sky-300/15 text-sky-100" : "text-white/72"
-      }`}
+    <div
+      className="relative"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {icon}
-      <span className="max-w-full truncate">{label}</span>
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={tip}
+        onBlur={() => setHovered(false)}
+        onFocus={() => setHovered(true)}
+        className={`flex h-[50px] w-[56px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg text-[11px] transition-colors duration-200 hover:bg-white/[0.12] hover:text-white focus:outline-none focus-visible:bg-white/[0.12] focus-visible:ring-2 focus-visible:ring-white/15 ${
+          active ? "bg-white/[0.14] text-white" : "text-white/72"
+        }`}
+      >
+        {icon}
+        <span className="max-w-full truncate">{label}</span>
+      </button>
+      <span
+        role="tooltip"
+        className={`pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-30 -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/[0.1] bg-[#02070b]/[0.92] px-2.5 py-1.5 text-[11px] font-medium text-white/82 shadow-[0_16px_40px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-2xl transition duration-150 ease-out motion-reduce:transition-none ${
+          hovered
+            ? "translate-x-0 opacity-100"
+            : "-translate-x-1 opacity-0"
+        }`}
+        aria-hidden={!hovered}
+      >
+        {tip}
+      </span>
+    </div>
   );
 }

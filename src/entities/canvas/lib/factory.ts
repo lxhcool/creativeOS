@@ -8,6 +8,8 @@ import type {
   CanvasShapeElement,
   CanvasTemplateElement,
   CanvasTextElement,
+  CanvasTextMeta,
+  CanvasTextRole,
 } from "../model/types";
 
 type Position = {
@@ -18,16 +20,25 @@ type Position = {
 const DEFAULT_NODE_WIDTH = 480;
 const DEFAULT_NODE_HEIGHT = 300;
 
-export function createTextElement(position: Position): CanvasTextElement {
+export function createTextElement(
+  position: Position,
+  options: {
+    textRole?: CanvasTextRole;
+    text?: string;
+    meta?: CanvasTextMeta;
+  } = {},
+): CanvasTextElement {
   return {
     id: generateId("text"),
     kind: "text",
+    textRole: options.textRole || "general",
+    meta: options.meta,
     x: position.x - DEFAULT_NODE_WIDTH / 2,
     y: position.y - DEFAULT_NODE_HEIGHT / 2,
     width: DEFAULT_NODE_WIDTH,
     height: DEFAULT_NODE_HEIGHT,
     rotation: 0,
-    text: "",
+    text: options.text || "",
     fill: "#f8fafc",
     fontSize: 14,
   };
