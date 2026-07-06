@@ -5,10 +5,16 @@ export type CanvasBrainChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  actions?: Array<{
+    id: string;
+    label: string;
+    command: string;
+  }>;
 };
 
 export function CanvasBrainPanel({
   panelClassName,
+  prominent = false,
   messages,
   input,
   loading,
@@ -21,8 +27,14 @@ export function CanvasBrainPanel({
   onClearMessages,
   onUploadImage,
   onSubmit,
+  onAction,
+  title = "画布大脑",
+  subtitle = "统筹素材、关系和生成任务",
+  placeholder = "描述目标，我来协调画布素材和生成任务",
+  workingMessage = "正在执行...",
 }: {
   panelClassName: string;
+  prominent?: boolean;
   messages: CanvasBrainChatMessage[];
   input: string;
   loading: boolean;
@@ -35,13 +47,24 @@ export function CanvasBrainPanel({
   onClearMessages: () => void;
   onUploadImage: () => void;
   onSubmit: () => void;
+  onAction?: (action: NonNullable<CanvasBrainChatMessage["actions"]>[number]) => void;
+  title?: string;
+  subtitle?: string;
+  placeholder?: string;
+  workingMessage?: string;
 }) {
   return (
-    <section className={`fixed bottom-24 right-5 z-30 flex h-[560px] w-[520px] max-w-[calc(100vw-40px)] flex-col rounded-[28px] ${panelClassName}`}>
+    <section
+      className={`fixed right-5 flex max-w-[calc(100vw-40px)] flex-col rounded-[28px] ${
+        prominent
+          ? "bottom-28 z-40 h-[min(680px,calc(100vh-144px))] w-[620px]"
+          : "bottom-24 z-30 h-[560px] w-[520px]"
+      } ${panelClassName}`}
+    >
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
         <div>
-          <h2 className="text-sm font-semibold text-white/90">画布大脑</h2>
-          <p className="text-xs text-white/40">统筹素材、关系和生成任务</p>
+          <h2 className="text-sm font-semibold text-white/90">{title}</h2>
+          <p className="text-xs text-white/40">{subtitle}</p>
         </div>
         <button
           type="button"
@@ -94,16 +117,31 @@ export function CanvasBrainPanel({
             key={message.id}
             className={`rounded-xl px-3 py-2 text-sm leading-6 ${
               message.role === "user"
-                ? "ml-8 border border-sky-200/15 bg-sky-300/15 text-sky-50"
+                ? "ml-8 border border-white/[0.14] bg-white/[0.12] text-white/90"
                 : "mr-8 border border-white/10 bg-white/[0.08] text-white/72"
             }`}
           >
             {message.content}
+            {message.actions && message.actions.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {message.actions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    onClick={() => onAction?.(action)}
+                    disabled={loading}
+                    className="h-8 cursor-pointer rounded-full border border-white/[0.12] bg-white/[0.1] px-3 text-[12px] font-semibold text-white/82 transition-colors duration-200 hover:bg-white/[0.16] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {loading && (
           <div className="mr-8 rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm text-white/45">
-            正在执行...
+            {workingMessage}
           </div>
         )}
       </div>
@@ -118,8 +156,8 @@ export function CanvasBrainPanel({
               onSubmit();
             }
           }}
-          placeholder="描述目标，我来协调画布素材和生成任务"
-          className="h-20 w-full resize-none rounded-2xl border border-white/10 bg-black/[0.22] px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-accent/70 focus:bg-black/[0.3]"
+          placeholder={placeholder}
+          className="h-20 w-full resize-none rounded-2xl border border-white/10 bg-black/[0.22] px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/25 focus:bg-black/[0.3]"
         />
         <button
           type="button"

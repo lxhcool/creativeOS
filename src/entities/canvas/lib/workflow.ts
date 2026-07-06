@@ -67,8 +67,9 @@ export function createResultPlaceholder(params: {
   kind: "image" | "video" | "audio";
   prompt: string;
   modelRef: string;
+  position?: Position;
 }): CanvasImageElement | CanvasMediaElement {
-  const position = getResultNodePosition(params.source);
+  const position = params.position || getResultNodePosition(params.source);
 
   if (params.kind === "image") {
     return {

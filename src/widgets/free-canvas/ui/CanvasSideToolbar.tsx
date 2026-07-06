@@ -1,19 +1,20 @@
 import {
   BookOpen,
+  ChevronRight,
   Clapperboard,
   FileInput,
   FileText,
   Image as ImageIcon,
   ListTree,
   Music,
+  PenLine,
   Settings,
   Type,
   UserRound,
+  UsersRound,
   Video,
   WandSparkles,
 } from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
 import {
   type FocusEvent,
   type ReactNode,
@@ -44,12 +45,27 @@ const TEXT_MENU_ITEMS: TextMenuItem[] = [
   {
     role: "novel_setup",
     icon: <BookOpen className="h-4 w-4" />,
-    description: "题材、世界观、主角",
+    description: "类型、读者、卖点、风格",
+  },
+  {
+    role: "novel_core",
+    icon: <BookOpen className="h-4 w-4" />,
+    description: "梗概、目标、冲突、情绪线",
+  },
+  {
+    role: "novel_world",
+    icon: <ListTree className="h-4 w-4" />,
+    description: "背景、规则、势力、名词表",
   },
   {
     role: "novel_outline",
     icon: <ListTree className="h-4 w-4" />,
-    description: "主线、转折、阶段",
+    description: "全书主线、阶段、结局",
+  },
+  {
+    role: "novel_volume_outline",
+    icon: <ListTree className="h-4 w-4" />,
+    description: "分卷目标、转折、卷末钩子",
   },
   {
     role: "novel_chapter_outline",
@@ -62,24 +78,49 @@ const TEXT_MENU_ITEMS: TextMenuItem[] = [
     description: "章节正文、续写",
   },
   {
+    role: "novel_bible",
+    icon: <FileText className="h-4 w-4" />,
+    description: "时间线、伏笔、设定一致性",
+  },
+  {
+    role: "novel_style_guide",
+    icon: <PenLine className="h-4 w-4" />,
+    description: "句式、对白、节奏、禁用词",
+  },
+  {
+    role: "character_cast",
+    icon: <UsersRound className="h-4 w-4" />,
+    description: "主要角色、阵营、目标",
+  },
+  {
     role: "character",
     icon: <UserRound className="h-4 w-4" />,
-    description: "人物卡、关系、弧光",
+    description: "单人角色卡、人设档案",
+  },
+  {
+    role: "character_relation",
+    icon: <UsersRound className="h-4 w-4" />,
+    description: "关系网、阵营、冲突结构",
+  },
+  {
+    role: "scene",
+    icon: <PenLine className="h-4 w-4" />,
+    description: "出场片段、关键桥段、单场戏",
   },
   {
     role: "script",
     icon: <Clapperboard className="h-4 w-4" />,
-    description: "场景、动作、对白",
+    description: "改编稿、动作、对白",
   },
   {
     role: "storyboard",
     icon: <Clapperboard className="h-4 w-4" />,
-    description: "镜头、画面、时长",
+    description: "视频分镜、镜头、时长",
   },
   {
     role: "prompt",
     icon: <WandSparkles className="h-4 w-4" />,
-    description: "图像/视频生成提示词",
+    description: "图像生成提示词",
   },
 ];
 
@@ -90,6 +131,9 @@ export function CanvasSideToolbar({
   onAddAudio,
   onImport,
   onOpenApiConfig,
+  textRoles,
+  mediaKinds,
+  allowImport = true,
 }: {
   onAddTextRole: (role: CanvasTextRole) => void;
   onAddImage: () => void;
@@ -97,59 +141,56 @@ export function CanvasSideToolbar({
   onAddAudio: () => void;
   onImport: () => void;
   onOpenApiConfig: () => void;
+  textRoles?: CanvasTextRole[];
+  mediaKinds?: Array<"image" | "video" | "audio">;
+  allowImport?: boolean;
 }) {
+  const visibleTextRoles = textRoles || TEXT_MENU_ITEMS.map((item) => item.role);
+  const visibleMediaKinds = mediaKinds || ["image", "video", "audio"];
+
   return (
     <aside
       className="fixed z-20 box-border flex w-[68px] flex-col items-center gap-1 overflow-visible border border-white/10 bg-black/[0.28] p-[6px] text-white shadow-2xl shadow-black/[0.28] backdrop-blur-xl"
       style={{ left: 16, top: 48, borderRadius: 12 }}
     >
-      <Link
-        href="/"
-        className="group flex h-[50px] w-[56px] cursor-pointer items-center justify-center rounded-lg text-white/80 transition duration-200 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15"
-        aria-label="返回首页"
-      >
-        <Image
-          src="/logo.png"
-          alt="CreativeOS"
-          width={30}
-          height={30}
-          className="h-7 w-7 object-contain transition duration-200 group-hover:-translate-y-0.5 group-hover:brightness-125 group-hover:drop-shadow-[0_8px_18px_rgba(47,136,210,0.28)] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
-          priority
-        />
-      </Link>
-
-      <ToolbarDivider />
-
       {/* 创作工具组 */}
-      <TextToolMenu onAddTextRole={onAddTextRole} />
-      <ToolButton
-        icon={<ImageIcon className="h-[18px] w-[18px]" />}
-        label="图像"
-        tooltip="添加图像节点"
-        onClick={onAddImage}
-      />
-      <ToolButton
-        icon={<Video className="h-[18px] w-[18px]" />}
-        label="视频"
-        tooltip="添加视频节点"
-        onClick={onAddVideo}
-      />
-      <ToolButton
-        icon={<Music className="h-[18px] w-[18px]" />}
-        label="音乐"
-        tooltip="添加音频节点"
-        onClick={onAddAudio}
-      />
+      <TextToolMenu onAddTextRole={onAddTextRole} textRoles={visibleTextRoles} />
+      {visibleMediaKinds.includes("image") && (
+        <ToolButton
+          icon={<ImageIcon className="h-[18px] w-[18px]" />}
+          label="图像"
+          tooltip="添加图像节点"
+          onClick={onAddImage}
+        />
+      )}
+      {visibleMediaKinds.includes("video") && (
+        <ToolButton
+          icon={<Video className="h-[18px] w-[18px]" />}
+          label="视频"
+          tooltip="添加视频节点"
+          onClick={onAddVideo}
+        />
+      )}
+      {visibleMediaKinds.includes("audio") && (
+        <ToolButton
+          icon={<Music className="h-[18px] w-[18px]" />}
+          label="音乐"
+          tooltip="添加音频节点"
+          onClick={onAddAudio}
+        />
+      )}
 
       <ToolbarDivider />
 
       {/* 系统工具组 */}
-      <ToolButton
-        icon={<FileInput className="h-[18px] w-[18px]" />}
-        label="导入"
-        tooltip="导入画布 JSON"
-        onClick={onImport}
-      />
+      {allowImport && (
+        <ToolButton
+          icon={<FileInput className="h-[18px] w-[18px]" />}
+          label="导入"
+          tooltip="导入画布 JSON"
+          onClick={onImport}
+        />
+      )}
       <ToolButton
         icon={<Settings className="h-[18px] w-[18px]" />}
         label="API"
@@ -166,10 +207,13 @@ function ToolbarDivider() {
 
 function TextToolMenu({
   onAddTextRole,
+  textRoles,
 }: {
   onAddTextRole: (role: CanvasTextRole) => void;
+  textRoles: CanvasTextRole[];
 }) {
   const [open, setOpen] = useState(false);
+  const visibleItems = TEXT_MENU_ITEMS.filter((item) => textRoles.includes(item.role));
 
   const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
     const nextTarget = event.relatedTarget;
@@ -188,7 +232,7 @@ function TextToolMenu({
       onBlurCapture={handleBlur}
     >
       <div
-        className={`relative grid h-[50px] w-[56px] min-w-0 cursor-default flex-col place-items-center gap-1 rounded-lg text-[11px] transition-colors duration-200 ${
+        className={`relative flex h-[50px] w-[56px] min-w-0 cursor-default flex-col items-center justify-center gap-1 rounded-lg text-[11px] transition-colors duration-200 ${
           open ? "bg-white/[0.12] text-white" : "text-white/72"
         }`}
         aria-haspopup="menu"
@@ -198,11 +242,12 @@ function TextToolMenu({
       >
         <Type className="h-[18px] w-[18px] shrink-0" />
         <span className="max-w-full truncate">文本</span>
-        {/* 右下角小三角：图标工具栏表达“可展开更多”的行业标准 */}
-        <span
+        <ChevronRight
           aria-hidden
-          className={`absolute bottom-[5px] right-[5px] h-0 w-0 border-b-[5px] border-l-[5px] border-b-current border-l-transparent transition-opacity duration-200 ${
-            open ? "opacity-80" : "opacity-35"
+          className={`absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 transition duration-200 ${
+            open
+              ? "translate-x-0 text-white/72"
+              : "-translate-x-0.5 text-white/32"
           }`}
         />
       </div>
@@ -221,7 +266,7 @@ function TextToolMenu({
             文本节点
           </div>
           <div className="grid gap-1">
-            {TEXT_MENU_ITEMS.map((item) => {
+            {visibleItems.map((item) => {
               const config = getCanvasTextRoleConfig(item.role);
 
               return (

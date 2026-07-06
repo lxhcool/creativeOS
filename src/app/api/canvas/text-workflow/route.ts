@@ -38,10 +38,20 @@ const textRoleSchema = z.enum([
   "general",
   "article",
   "novel_setup",
+  "novel_core",
+  "novel_world",
   "novel_outline",
+  "novel_volume_outline",
   "novel_chapter_outline",
+  "novel_scene_outline",
   "novel_chapter",
+  "novel_bible",
+  "novel_style_guide",
+  "character_cast",
   "character",
+  "character_relation",
+  "character_arc",
+  "scene",
   "script",
   "storyboard",
   "prompt",
@@ -104,17 +114,47 @@ function getRoleGuidance(role: WorkflowRequest["resultTextRole"]): string {
   if (role === "novel_chapter") {
     return "最终结果必须是小说章节正文，重点是场景、行动、人物感受、对白、冲突推进和结尾钩子。不要输出规划过程。";
   }
+  if (role === "novel_scene_outline") {
+    return "最终结果必须是场景大纲，服务于单章正文写作。包含场景目标、出场人物、人物行动、尝试与失败、线索或反转、情绪推进和悬念收尾。不要写成视频分镜。";
+  }
   if (role === "novel_chapter_outline") {
     return "最终结果必须是章节大纲，包含章节标题、本章目标、出场人物、关键场景、冲突、转折、伏笔和结尾钩子。";
   }
+  if (role === "novel_volume_outline") {
+    return "最终结果必须是分卷大纲，包含每卷主题、阶段目标、主要冲突、关键转折、人物变化、伏笔推进和卷末钩子。";
+  }
   if (role === "novel_outline") {
-    return "最终结果必须是故事大纲，包含主线、阶段目标、关键转折、人物成长和结局方向。";
+    return "最终结果必须是全书大纲，包含全书主线、阶段目标、核心冲突升级、关键转折、人物成长和结局方向。";
+  }
+  if (role === "novel_world") {
+    return "最终结果必须是世界观设定，只定义故事发生的外部规则：时代/空间背景、权力结构、能力或规则体系、社会规则、禁忌与代价、地图或主要场景、历史事件和专有名词表。不要输出角色总表、故事核心、全书大纲、章节大纲或正文。";
+  }
+  if (role === "novel_core") {
+    return "最终结果必须是故事核心，只定义主线驱动力：一句话故事命题、核心问题、主线目标、主要阻碍类型、关键赌注、冲突升级方式、结局方向和情绪主线。不要输出角色总表、世界观设定、全书大纲、章节大纲或正文。";
   }
   if (role === "novel_setup") {
-    return "最终结果必须是小说设定，包含题材、世界观、主角、核心矛盾、金手指、风格和长期看点。";
+    return "最终结果必须是小说定位，只包含题材类型、目标读者、篇幅目标、叙事视角、情绪基调、核心卖点、平台方向、读者期待和内容禁区。不要输出角色总表、世界观设定、故事核心、全书大纲、章节大纲或正文。";
+  }
+  if (role === "novel_bible") {
+    return "最终结果必须是小说圣经，包含人物设定表、时间线、地点表、伏笔表、道具表、能力规则表、已发生事件摘要、未解决悬念和设定冲突检查。";
+  }
+  if (role === "novel_style_guide") {
+    return "最终结果必须是风格指南，包含句子长短、对白风格、描写密度、叙事节奏、是否允许网络梗、文学化程度、禁用词、高频词和平台尺度。";
+  }
+  if (role === "character_cast") {
+    return "最终结果必须是角色总表，面向整部小说的主要角色清单。每个角色包含姓名/代称、身份、阵营、目标、弱点、剧情功能、与主线关系、与其他角色的基础连接。不要输出世界观设定、全书大纲、章节大纲、单个角色卡或正文。";
   }
   if (role === "character") {
-    return "最终结果必须是角色卡，包含身份、外貌、性格、背景、目标、弱点、关系、人物弧光和视觉关键词。";
+    return "最终结果必须是单个核心角色的角色卡，包含身份、外貌、性格、背景、目标、弱点、核心关系和人物弧光。不要写成多人总表，也不要写成媒体生成提示词。";
+  }
+  if (role === "character_relation") {
+    return "最终结果必须是人物关系网，包含关键人物、彼此立场、利益、情感联系、隐藏动机、冲突点和剧情用途。";
+  }
+  if (role === "character_arc") {
+    return "最终结果必须是角色线，包含主要角色在故事各阶段的目标变化、关系推进、冲突升级、关键转折和人物弧光。";
+  }
+  if (role === "scene") {
+    return "最终结果必须是小说场景片段或桥段正文，重点是场景目标、人物行动、对白或旁白、冲突推进和结尾钩子。不要写成分镜。";
   }
   if (role === "script") {
     return "最终结果必须是剧本，包含场景、人物、动作、对白和镜头提示。";
@@ -123,7 +163,7 @@ function getRoleGuidance(role: WorkflowRequest["resultTextRole"]): string {
     return "最终结果必须是分镜脚本，每个镜头包含画面、动作、对白或旁白、时长和生成提示词。";
   }
   if (role === "prompt") {
-    return "最终结果必须是适合图像或视频生成的提示词，包含主体、动作、场景、风格、构图、光线、镜头和负面限制。";
+    return "最终结果必须是适合图像生成的提示词，包含主体、动作、场景、风格、构图、光线和负面限制。";
   }
   if (role === "article") {
     return "最终结果必须是一篇完整文章，包含标题、开头、主体段落和结尾。";
@@ -320,9 +360,7 @@ export async function POST(request: Request) {
     };
 
     const gateway = new ModelGateway(config);
-    const maxTokens = body.model.maxOutputTokens
-      ? Math.min(body.model.maxOutputTokens, 6000)
-      : 3000;
+    const maxTokens = body.model.maxOutputTokens || 3000;
     const result = await textWorkflow.invoke({
       params: {
         body,

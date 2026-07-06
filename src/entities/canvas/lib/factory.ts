@@ -17,8 +17,8 @@ type Position = {
   y: number;
 };
 
-const DEFAULT_NODE_WIDTH = 480;
-const DEFAULT_NODE_HEIGHT = 300;
+const DEFAULT_NODE_WIDTH = 530;
+const DEFAULT_NODE_HEIGHT = 350;
 
 export function createTextElement(
   position: Position,
@@ -49,10 +49,10 @@ export function createCircleElement(position: Position): CanvasShapeElement {
     id: generateId("shape"),
     kind: "shape",
     shape: "circle",
-    x: position.x - 90,
-    y: position.y - 90,
-    width: 180,
-    height: 180,
+    x: position.x - 115,
+    y: position.y - 115,
+    width: 230,
+    height: 230,
     rotation: 0,
     fill: "#38bdf8",
     stroke: "#0f172a",

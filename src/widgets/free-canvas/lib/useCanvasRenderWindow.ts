@@ -2,13 +2,16 @@ import { useMemo } from "react";
 import type {
   CanvasEdge,
   CanvasElement,
+  CanvasTextElement,
   CanvasProcessorElement,
   CanvasTemplateElement,
   CanvasViewport,
 } from "@/entities/canvas/model/types";
+import { getCanvasTextRole } from "@/entities/canvas/lib/textRoles";
 import {
   getInputPortPosition,
   getOutputPortPosition,
+  type CanvasFlowDirection,
 } from "./geometry";
 
 const CANVAS_RENDER_PADDING = 900;
@@ -36,6 +39,7 @@ type CanvasRenderWindowParams = {
   selectedEdgeId: string | null;
   hoveredId: string | null;
   draggingElementId: string | null;
+  flowDirection?: CanvasFlowDirection;
   draftSourceId?: string;
 };
 
@@ -80,9 +84,10 @@ function isConnectorInBounds(
   source: CanvasElement,
   target: CanvasElement,
   bounds: CanvasWorldBounds,
+  direction: CanvasFlowDirection,
 ): boolean {
-  const sourcePort = getOutputPortPosition(source);
-  const targetPort = getInputPortPosition(target);
+  const sourcePort = getOutputPortPosition(source, direction);
+  const targetPort = getInputPortPosition(target, direction);
   const left = Math.min(sourcePort.x, targetPort.x);
   const right = Math.max(sourcePort.x, targetPort.x);
   const top = Math.min(sourcePort.y, targetPort.y);
@@ -96,7 +101,23 @@ function isConnectorInBounds(
   );
 }
 
+function isNextChapterOutlineAuxiliaryEdge(params: {
+  edge: CanvasEdge;
+  target: CanvasElement;
+}): boolean {
+  if (params.target.kind !== "text") return false;
+
+  const target = params.target as CanvasTextElement;
+  return (
+    getCanvasTextRole(target.textRole) === "novel_chapter_outline" &&
+    target.meta?.sourceRole === "novel_chapter_outline" &&
+    !!target.meta.sourceNodeId &&
+    params.edge.sourceId !== target.meta.sourceNodeId
+  );
+}
+
 export function useCanvasRenderWindow(params: CanvasRenderWindowParams) {
+  const flowDirection = params.flowDirection || "horizontal";
   const elementById = useMemo(() => {
     return new Map(params.elements.map((element) => [element.id, element]));
   }, [params.elements]);
@@ -148,6 +169,7 @@ export function useCanvasRenderWindow(params: CanvasRenderWindowParams) {
           const source = elementById.get(edge.sourceId);
           const target = elementById.get(edge.targetId);
           if (!source || !target) return null;
+          if (isNextChapterOutlineAuxiliaryEdge({ edge, target })) return null;
 
           const visible =
             edge.id === params.selectedEdgeId ||
@@ -155,7 +177,7 @@ export function useCanvasRenderWindow(params: CanvasRenderWindowParams) {
             alwaysRenderedElementIds.has(target.id) ||
             isElementInBounds(source, visibleWorldBounds) ||
             isElementInBounds(target, visibleWorldBounds) ||
-            isConnectorInBounds(source, target, visibleWorldBounds);
+            isConnectorInBounds(source, target, visibleWorldBounds, flowDirection);
 
           return visible ? { edge, source, target } : null;
         })
@@ -165,6 +187,7 @@ export function useCanvasRenderWindow(params: CanvasRenderWindowParams) {
       elementById,
       params.edges,
       params.selectedEdgeId,
+      flowDirection,
       visibleWorldBounds,
     ],
   );

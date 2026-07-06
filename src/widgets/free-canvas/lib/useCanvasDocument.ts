@@ -220,7 +220,6 @@ export function useCanvasDocument() {
 
   const clearCanvas = useCallback(() => {
     if (elementsRef.current.length === 0) return;
-    if (!window.confirm("确定清空画布上的所有元素吗？")) return;
     commitCanvas({ elements: [], edges: [] });
     setSelectedId(null);
     setSelectedEdgeId(null);

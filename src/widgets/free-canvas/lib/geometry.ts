@@ -10,6 +10,8 @@ import {
   PORT_OFFSET,
 } from "../model/constants";
 
+export type CanvasFlowDirection = "horizontal" | "vertical";
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -66,14 +68,34 @@ export function useViewportSize() {
   return size;
 }
 
-export function getOutputPortPosition(element: CanvasElement): { x: number; y: number } {
+export function getOutputPortPosition(
+  element: CanvasElement,
+  direction: CanvasFlowDirection = "horizontal",
+): { x: number; y: number } {
+  if (direction === "vertical") {
+    return {
+      x: element.x + element.width / 2,
+      y: element.y + element.height + PORT_OFFSET,
+    };
+  }
+
   return {
     x: element.x + element.width + PORT_OFFSET,
     y: element.y + element.height / 2,
   };
 }
 
-export function getInputPortPosition(element: CanvasElement): { x: number; y: number } {
+export function getInputPortPosition(
+  element: CanvasElement,
+  direction: CanvasFlowDirection = "horizontal",
+): { x: number; y: number } {
+  if (direction === "vertical") {
+    return {
+      x: element.x + element.width / 2,
+      y: element.y - PORT_OFFSET,
+    };
+  }
+
   return {
     x: element.x - PORT_OFFSET,
     y: element.y + element.height / 2,
@@ -95,7 +117,26 @@ export function isPointInsideElement(
 export function getConnectorPathData(
   from: { x: number; y: number },
   to: { x: number; y: number },
+  direction: CanvasFlowDirection = "horizontal",
 ): string {
+  if (direction === "vertical") {
+    const deltaX = to.x - from.x;
+    const deltaY = to.y - from.y;
+    const sameDirection = deltaY >= 0;
+    const bend = sameDirection
+      ? clamp(Math.abs(deltaY) * 0.45, 96, 260)
+      : clamp(Math.abs(deltaY) * 0.32 + Math.abs(deltaX) * 0.18, 120, 300);
+    const sourceControlY = from.y + bend;
+    const targetControlY = sameDirection ? to.y - bend : to.y - bend;
+
+    return [
+      `M ${from.x} ${from.y}`,
+      `C ${from.x} ${sourceControlY}`,
+      `${to.x} ${targetControlY}`,
+      `${to.x} ${to.y}`,
+    ].join(" ");
+  }
+
   const deltaX = to.x - from.x;
   const deltaY = to.y - from.y;
   const sameDirection = deltaX >= 0;

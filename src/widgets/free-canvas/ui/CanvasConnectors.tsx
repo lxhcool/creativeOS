@@ -3,27 +3,31 @@ import Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import { Circle, Group, Path, Rect, Text } from "react-konva";
 import type { CanvasElement } from "@/entities/canvas/model/types";
+import type { CanvasWorkflowGroup } from "@/features/canvas-workflows";
 import {
   getConnectorPathData,
   getInputPortPosition,
   getOutputPortPosition,
+  type CanvasFlowDirection,
 } from "../lib/geometry";
 import type { CanvasDraftEdge } from "../model/types";
 import { PORT_RADIUS } from "../model/constants";
 
 export function CanvasConnectionHandle({
   element,
+  direction = "horizontal",
   onHover,
   onLeave,
   onStartConnection,
 }: {
   element: CanvasElement;
+  direction?: CanvasFlowDirection;
   onHover: () => void;
   onLeave: () => void;
   onStartConnection: (event: KonvaEventObject<MouseEvent | TouchEvent>) => void;
 }) {
-  const input = getInputPortPosition(element);
-  const output = getOutputPortPosition(element);
+  const input = getInputPortPosition(element, direction);
+  const output = getOutputPortPosition(element, direction);
 
   return (
     <Group listening onMouseEnter={onHover} onMouseLeave={onLeave}>
@@ -63,18 +67,30 @@ export function CanvasConnectionHandle({
 function CanvasEdgeNode({
   source,
   target,
+  groups = [],
+  direction = "horizontal",
   selected,
   onSelect,
   onDelete,
 }: {
   source: CanvasElement;
   target: CanvasElement;
+  groups?: CanvasWorkflowGroup[];
+  direction?: CanvasFlowDirection;
   selected: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
-  const sourcePort = getOutputPortPosition(source);
-  const targetPort = getInputPortPosition(target);
+  const sourceGroup = groups.find((group) => group.elementIds.includes(source.id));
+  const targetGroup = groups.find((group) => group.elementIds.includes(target.id));
+  const rawSourcePort = getOutputPortPosition(source, direction);
+  const rawTargetPort = getInputPortPosition(target, direction);
+  const sourcePort = sourceGroup
+    ? getGroupOutputPortPosition(sourceGroup, direction, rawTargetPort)
+    : rawSourcePort;
+  const targetPort = targetGroup
+    ? getGroupInputPortPosition(targetGroup, direction, rawSourcePort)
+    : rawTargetPort;
 
   return (
     <FlowingConnector
@@ -82,6 +98,7 @@ function CanvasEdgeNode({
       to={targetPort}
       opacity={selected ? 0.96 : 0.72}
       selected={selected}
+      direction={direction}
       animated
       showEndpoints
       onSelect={onSelect}
@@ -95,14 +112,63 @@ export const MemoCanvasEdgeNode = memo(
   (previous, next) =>
     previous.source === next.source &&
     previous.target === next.target &&
+    previous.groups === next.groups &&
+    previous.direction === next.direction &&
     previous.selected === next.selected,
 );
 
-export function DraftEdgeNode({ edge }: { edge: CanvasDraftEdge }) {
+function getGroupOutputPortPosition(
+  group: CanvasWorkflowGroup,
+  direction: CanvasFlowDirection,
+  anchor?: { x: number; y: number },
+): { x: number; y: number } {
+  if (direction === "vertical") {
+    return {
+      x: clampToRange(anchor?.x ?? group.x + group.width / 2, group.x, group.x + group.width),
+      y: group.y + group.height + 10,
+    };
+  }
+
+  return {
+    x: group.x + group.width + 10,
+    y: clampToRange(anchor?.y ?? group.y + group.height / 2, group.y, group.y + group.height),
+  };
+}
+
+function getGroupInputPortPosition(
+  group: CanvasWorkflowGroup,
+  direction: CanvasFlowDirection,
+  anchor?: { x: number; y: number },
+): { x: number; y: number } {
+  if (direction === "vertical") {
+    return {
+      x: clampToRange(anchor?.x ?? group.x + group.width / 2, group.x, group.x + group.width),
+      y: group.y - 10,
+    };
+  }
+
+  return {
+    x: group.x - 10,
+    y: clampToRange(anchor?.y ?? group.y + group.height / 2, group.y, group.y + group.height),
+  };
+}
+
+function clampToRange(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function DraftEdgeNode({
+  edge,
+  direction = "horizontal",
+}: {
+  edge: CanvasDraftEdge;
+  direction?: CanvasFlowDirection;
+}) {
   return (
     <FlowingConnector
       from={edge.from}
       to={edge.to}
+      direction={direction}
       opacity={0.9}
       selected={false}
       animated
@@ -114,6 +180,7 @@ export function DraftEdgeNode({ edge }: { edge: CanvasDraftEdge }) {
 function FlowingConnector({
   from,
   to,
+  direction = "horizontal",
   opacity,
   selected,
   animated = false,
@@ -123,6 +190,7 @@ function FlowingConnector({
 }: {
   from: { x: number; y: number };
   to: { x: number; y: number };
+  direction?: CanvasFlowDirection;
   opacity: number;
   selected: boolean;
   animated?: boolean;
@@ -131,7 +199,7 @@ function FlowingConnector({
   onDelete?: () => void;
 }) {
   const pathRef = useRef<Konva.Path>(null);
-  const pathData = getConnectorPathData(from, to);
+  const pathData = getConnectorPathData(from, to, direction);
   const midpoint = {
     x: (from.x + to.x) / 2,
     y: (from.y + to.y) / 2,
@@ -187,13 +255,13 @@ function FlowingConnector({
       <Path
         ref={pathRef}
         data={pathData}
-        stroke={selected ? "rgba(255,184,112,0.96)" : "rgba(76,166,235,0.72)"}
-        strokeWidth={selected ? 2.4 : 1.8}
-        dash={selected ? [14, 14] : [10, 14]}
+        stroke={selected ? "rgba(255,214,170,0.92)" : "rgba(214,224,226,0.46)"}
+        strokeWidth={selected ? 2.3 : 1.6}
+        dash={selected ? [14, 16] : [10, 18]}
         lineCap="round"
         lineJoin="round"
-        shadowColor={selected ? "rgba(239,91,43,0.45)" : "rgba(47,136,210,0.34)"}
-        shadowBlur={selected ? 12 : 8}
+        shadowColor={selected ? "rgba(239,91,43,0.34)" : "rgba(178,206,219,0.2)"}
+        shadowBlur={selected ? 10 : 6}
         listening={false}
       />
       {selected && onDelete && (

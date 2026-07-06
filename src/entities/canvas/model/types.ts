@@ -16,16 +16,29 @@ export type CanvasArtifactType =
   | "json"
   | "asset_pack";
 
+export type CanvasWorkflowType = "free" | "novel" | "video" | "image";
+
 export type CanvasGenerationStatus = "idle" | "generating" | "done" | "failed";
+export type CanvasTextResultRelationKind = "child" | "sequence" | "support";
 
 export type CanvasTextRole =
   | "general"
   | "article"
   | "novel_setup"
+  | "novel_core"
+  | "novel_world"
   | "novel_outline"
+  | "novel_volume_outline"
   | "novel_chapter_outline"
+  | "novel_scene_outline"
   | "novel_chapter"
+  | "novel_bible"
+  | "novel_style_guide"
+  | "character_cast"
   | "character"
+  | "character_relation"
+  | "character_arc"
+  | "scene"
   | "script"
   | "storyboard"
   | "prompt";
@@ -45,7 +58,13 @@ export interface CanvasTextMeta {
   sourceNodeId?: string;
   sourceRole?: CanvasTextRole;
   parentNodeId?: string;
+  relationKind?: CanvasTextResultRelationKind;
   sourceRunId?: string;
+  workflowProjectId?: string;
+  workflowStageId?: string;
+  workflowBatchId?: string;
+  workflowSequenceNo?: number;
+  workflowLocked?: boolean;
   agentSummary?: string;
   continuityNotes?: string[];
   nextHooks?: string[];
@@ -131,10 +150,22 @@ export interface CanvasEdge {
   targetId: string;
 }
 
+export type CanvasAssistantMessage = {
+  role: "user" | "assistant";
+  content: string;
+  actions?: Array<{
+    id: string;
+    label: string;
+    command: string;
+  }>;
+};
+
 export interface CanvasProjectExport {
   version: "1.0.0";
   exportedAt: string;
+  workflowType?: CanvasWorkflowType;
   viewport: CanvasViewport;
   elements: CanvasElement[];
   edges: CanvasEdge[];
+  assistantMessages?: CanvasAssistantMessage[];
 }
