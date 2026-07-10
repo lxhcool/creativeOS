@@ -1,7 +1,6 @@
 import type {
   CanvasEdge,
   CanvasElement,
-  CanvasTextRole,
 } from "@/entities/canvas/model/types";
 import type { UserModel, UserProvider } from "@/types/provider";
 import type { PreparedCanvasBrainAction } from "./action-context";
@@ -22,30 +21,15 @@ export type CanvasTextGenerationSource = {
 export type CanvasTextGenerationParams = {
   prompt: string;
   current: CanvasTextGenerationSource;
+  projectId?: string | null;
   provider: UserProvider;
   model: UserModel;
   sources: CanvasTextGenerationSource[];
 };
 
-export type CanvasCollaborativeTextMemory = {
-  title?: string;
-  summary: string;
-  continuityNotes: string[];
-  nextHooks: string[];
-};
-
-export type CanvasCollaborativeTextGenerationParams =
-  CanvasTextGenerationParams & {
-    resultTextRole: CanvasTextRole;
-  };
-
-export type CanvasCollaborativeTextGenerationResult = {
-  content: string;
-  memory?: CanvasCollaborativeTextMemory;
-};
-
 export type CanvasImageGenerationParams = {
   prompt: string;
+  projectId?: string | null;
   referenceImageUrls?: string[];
   provider: UserProvider;
   model: UserModel;
@@ -62,8 +46,23 @@ export type CanvasActionIntent = {
   reason?: string;
 };
 
+export type CanvasAssetWorkflowKind =
+  | "image"
+  | "video"
+  | "novel"
+  | "novel_chapter"
+  | "article"
+  | "character"
+  | "script"
+  | "storyboard"
+  | "novel_merge_updates"
+  | "consistency_check";
+
 export type CanvasBrainPlan = {
   mode: "chat" | "action";
+  intentType?: "create_asset" | "modify_asset" | "ask_question" | "navigate_canvas" | "unclear";
+  confidence?: number;
+  assetWorkflow?: CanvasAssetWorkflowKind;
   sourceIds: string[];
   createdSources: Array<{
     kind: "text";
@@ -78,12 +77,21 @@ export type CanvasBrainPlan = {
   question?: string;
 };
 
+export type CanvasBrainMemorySummary = {
+  id: string;
+  type: string;
+  title: string;
+  content: unknown;
+  sourceElementIds: string[];
+};
+
 export type CanvasBrainTurnParams = {
   command: string;
   history: CanvasBrainMessage[];
   elements: CanvasElement[];
   edges: CanvasEdge[];
   focusIds: string[];
+  projectId?: string | null;
   selectedElement: CanvasElement | null;
   center: {
     x: number;

@@ -24,13 +24,39 @@ import {
   normalizeCanvasProjectExport,
 } from "./canvasProjectStorage";
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("文件读取失败"));
-    reader.readAsDataURL(file);
+type UploadedCanvasAsset = {
+  url: string;
+  name: string;
+  type: string;
+  kind: "image" | "video" | "audio" | "file";
+};
+
+async function uploadCanvasAssetFile(
+  file: File,
+  projectId?: string | null,
+): Promise<UploadedCanvasAsset> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (projectId) formData.append("projectId", projectId);
+
+  const response = await fetch("/api/canvas/assets/upload", {
+    method: "POST",
+    body: formData,
   });
+  const data = (await response.json()) as Partial<UploadedCanvasAsset> & {
+    error?: string;
+  };
+
+  if (!response.ok || !data.url || !data.name || !data.kind) {
+    throw new Error(data.error || "资产上传失败");
+  }
+
+  return {
+    url: data.url,
+    name: data.name,
+    type: data.type || file.type,
+    kind: data.kind,
+  };
 }
 
 const readImageSize = readBrowserImageSize;
@@ -74,11 +100,11 @@ export function useCanvasAssetController(params: {
     projectId: string,
     payload: CanvasProjectExport,
     name?: string,
-  ) => boolean;
+  ) => Promise<boolean>;
   addCanvasSaveHistory: (
     payload: CanvasProjectExport,
     name?: string,
-  ) => unknown;
+  ) => Promise<unknown>;
   showCanvasSaveStatus: (message: string) => void;
 }) {
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -108,7 +134,14 @@ export function useCanvasAssetController(params: {
   const handleImageFile = useCallback(
     async (file: File | undefined, targetId?: string | null) => {
       if (!file) return;
-      const src = await readFileAsDataUrl(file);
+      let upload: UploadedCanvasAsset;
+      try {
+        upload = await uploadCanvasAssetFile(file, params.currentProjectId);
+      } catch (error) {
+        params.showCanvasSaveStatus(error instanceof Error ? error.message : "图片上传失败");
+        return;
+      }
+      const src = upload.url;
       const imageSize = await readImageSize(src);
       const nodeSize = getImageNodeSize(imageSize.width, imageSize.height);
 
@@ -120,7 +153,7 @@ export function useCanvasAssetController(params: {
 
         params.updateElement(target.id, {
           src,
-          label: file.name,
+          label: upload.name,
           x: target.x + target.width / 2 - nodeSize.width / 2,
           y: target.y + target.height / 2 - nodeSize.height / 2,
           width: nodeSize.width,
@@ -134,7 +167,7 @@ export function useCanvasAssetController(params: {
         ...createImageElement({
           position: center,
           src,
-          label: file.name,
+          label: upload.name,
         }),
         x: center.x - nodeSize.width / 2,
         y: center.y - nodeSize.height / 2,
@@ -148,7 +181,14 @@ export function useCanvasAssetController(params: {
   const handleBrainImageFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
-      const src = await readFileAsDataUrl(file);
+      let upload: UploadedCanvasAsset;
+      try {
+        upload = await uploadCanvasAssetFile(file, params.currentProjectId);
+      } catch (error) {
+        params.showCanvasSaveStatus(error instanceof Error ? error.message : "参考图上传失败");
+        return;
+      }
+      const src = upload.url;
       const imageSize = await readImageSize(src);
       const nodeSize = getImageNodeSize(imageSize.width, imageSize.height);
       const center = params.worldCenter();
@@ -159,7 +199,7 @@ export function useCanvasAssetController(params: {
             y: center.y,
           },
           src,
-          label: file.name,
+          label: upload.name,
         }),
         x: center.x - 260 - nodeSize.width / 2,
         y: center.y - nodeSize.height / 2,
@@ -172,7 +212,7 @@ export function useCanvasAssetController(params: {
         Array.from(new Set([...current, element.id])),
       );
       params.appendAssistantMessage(
-        `已把「${file.name}」添加为画布图片素材，下一次发送会优先参考它。`,
+        `已把「${upload.name}」添加为画布图片素材，下一次发送会优先参考它。`,
       );
     },
     [params],
@@ -181,7 +221,14 @@ export function useCanvasAssetController(params: {
   const handleVideoFile = useCallback(
     async (file: File | undefined, targetId?: string | null) => {
       if (!file) return;
-      const src = await readFileAsDataUrl(file);
+      let upload: UploadedCanvasAsset;
+      try {
+        upload = await uploadCanvasAssetFile(file, params.currentProjectId);
+      } catch (error) {
+        params.showCanvasSaveStatus(error instanceof Error ? error.message : "视频上传失败");
+        return;
+      }
+      const src = upload.url;
       const videoSize = await readVideoSize(src);
       const nodeSize = getVideoNodeSize(videoSize.width, videoSize.height);
 
@@ -193,7 +240,7 @@ export function useCanvasAssetController(params: {
 
         params.updateElement(target.id, {
           src,
-          label: file.name,
+          label: upload.name,
           x: target.x + target.width / 2 - nodeSize.width / 2,
           y: target.y + target.height / 2 - nodeSize.height / 2,
           width: nodeSize.width,
@@ -208,7 +255,7 @@ export function useCanvasAssetController(params: {
           kind: "video",
           position: center,
           src,
-          label: file.name,
+          label: upload.name,
         }),
         x: center.x - nodeSize.width / 2,
         y: center.y - nodeSize.height / 2,
@@ -222,7 +269,14 @@ export function useCanvasAssetController(params: {
   const handleAudioFile = useCallback(
     async (file: File | undefined, targetId?: string | null) => {
       if (!file) return;
-      const src = await readFileAsDataUrl(file);
+      let upload: UploadedCanvasAsset;
+      try {
+        upload = await uploadCanvasAssetFile(file, params.currentProjectId);
+      } catch (error) {
+        params.showCanvasSaveStatus(error instanceof Error ? error.message : "音频上传失败");
+        return;
+      }
+      const src = upload.url;
 
       if (targetId) {
         const target = params.elements.find(
@@ -232,7 +286,7 @@ export function useCanvasAssetController(params: {
 
         params.updateElement(target.id, {
           src,
-          label: file.name,
+          label: upload.name,
         } as Partial<CanvasElement>);
         return;
       }
@@ -242,7 +296,7 @@ export function useCanvasAssetController(params: {
           kind: "audio",
           position: params.worldCenter(),
           src,
-          label: file.name,
+          label: upload.name,
         }),
       );
     },
@@ -281,13 +335,13 @@ export function useCanvasAssetController(params: {
           useHistory: true,
         });
         if (params.currentProjectId) {
-          params.persistProjectRecord(
+          void params.persistProjectRecord(
             params.currentProjectId,
             payload,
             file.name.replace(/\.json$/i, "") || undefined,
           );
         }
-        params.addCanvasSaveHistory(
+        void params.addCanvasSaveHistory(
           payload,
           file.name.replace(/\.json$/i, "") || getCanvasProjectName(payload),
         );

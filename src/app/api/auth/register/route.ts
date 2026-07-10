@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { registerWithEmailCodeAuth } from "@/lib/auth-service";
+import { registerWithPasswordAuth } from "@/lib/auth-service";
 
 export async function POST(request: Request) {
   try {
@@ -7,14 +7,12 @@ export async function POST(request: Request) {
       name?: string;
       email?: string;
       password?: string;
-      code?: string;
     };
 
-    const result = await registerWithEmailCodeAuth(request, {
+    const result = await registerWithPasswordAuth(request, {
       name: body.name || "",
       email: body.email || "",
       password: body.password || "",
-      code: body.code || "",
     });
 
     if (!result.success || !result.payload) {

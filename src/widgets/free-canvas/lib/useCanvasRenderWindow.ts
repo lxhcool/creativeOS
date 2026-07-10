@@ -2,12 +2,10 @@ import { useMemo } from "react";
 import type {
   CanvasEdge,
   CanvasElement,
-  CanvasTextElement,
   CanvasProcessorElement,
   CanvasTemplateElement,
   CanvasViewport,
 } from "@/entities/canvas/model/types";
-import { getCanvasTextRole } from "@/entities/canvas/lib/textRoles";
 import {
   getInputPortPosition,
   getOutputPortPosition,
@@ -105,15 +103,8 @@ function isNextChapterOutlineAuxiliaryEdge(params: {
   edge: CanvasEdge;
   target: CanvasElement;
 }): boolean {
-  if (params.target.kind !== "text") return false;
-
-  const target = params.target as CanvasTextElement;
-  return (
-    getCanvasTextRole(target.textRole) === "novel_chapter_outline" &&
-    target.meta?.sourceRole === "novel_chapter_outline" &&
-    !!target.meta.sourceNodeId &&
-    params.edge.sourceId !== target.meta.sourceNodeId
-  );
+  void params;
+  return false;
 }
 
 export function useCanvasRenderWindow(params: CanvasRenderWindowParams) {

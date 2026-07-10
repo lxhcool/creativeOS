@@ -41,6 +41,10 @@ import {
   buildGatewayConfigFromSettings,
   mergeProviderSettings,
 } from "@/services/model/user-config";
+import {
+  deleteServerModelCredential,
+  saveServerModelCredential,
+} from "@/services/model-credentials/client";
 
 interface ProviderState {
   providers: UserProvider[];
@@ -58,6 +62,7 @@ interface ProviderState {
   }) => Promise<UserProvider>;
   updateProvider: (id: string, updates: Partial<UserProvider>) => Promise<void>;
   removeProvider: (id: string) => Promise<void>;
+  syncProviderCredentialToServer: (id: string) => Promise<string>;
   setProviderEnabled: (id: string, enabled: boolean) => Promise<void>;
   addModel: (params: {
     providerId: string;
@@ -280,6 +285,11 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
   },
 
   removeProvider: async (id) => {
+    const provider = get().providers.find((entry) => entry.id === id);
+    if (provider?.serverCredentialId) {
+      await deleteServerModelCredential(provider.serverCredentialId).catch(() => undefined);
+    }
+
     await dbDeleteProvider(id);
 
     set((state) => {
@@ -298,6 +308,38 @@ export const useProviderStore = create<ProviderState>()((set, get) => ({
         defaultModels,
       };
     });
+  },
+
+  syncProviderCredentialToServer: async (id) => {
+    const provider = get().providers.find((entry) => entry.id === id);
+    if (!provider) {
+      throw new Error("未找到供应商");
+    }
+    if (!provider.apiKey.trim()) {
+      throw new Error("请先填写 API Key");
+    }
+
+    const credential = await saveServerModelCredential({
+      id: provider.serverCredentialId || provider.id,
+      name: provider.name,
+      providerType: provider.type,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+    });
+    const updated: UserProvider = {
+      ...provider,
+      serverCredentialId: credential.id,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveProvider(updated);
+    set((state) => ({
+      providers: state.providers.map((entry) =>
+        entry.id === id ? updated : entry,
+      ),
+    }));
+
+    return credential.id;
   },
 
   setProviderEnabled: async (id, enabled) => {

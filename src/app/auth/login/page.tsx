@@ -24,7 +24,7 @@ export default function LoginPage() {
   return (
     <AuthShell
       title="登录"
-      description="使用密码或邮箱验证码进入你的 CreativeOS。"
+      description="使用邮箱和密码进入你的 CreativeOS。"
       footer={
         <>
           还没有账号？{" "}

@@ -5,8 +5,8 @@ import { useAuthStore } from "@/stores/useAuthStore";
 
 function FullscreenLoader() {
   return (
-    <div className="flex h-screen items-center justify-center bg-bg-primary">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+    <div className="flex h-screen items-center justify-center bg-[#02070b]">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
     </div>
   );
 }

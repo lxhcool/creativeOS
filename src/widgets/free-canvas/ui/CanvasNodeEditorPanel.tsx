@@ -9,7 +9,6 @@ import * as ScrollArea from "@radix-ui/react-scroll-area";
 import {
   AlertTriangle,
   ArrowUp,
-  BookOpen,
   Check,
   ChevronDown,
   Clapperboard,
@@ -18,7 +17,6 @@ import {
   Loader2,
   PenLine,
   Repeat2,
-  RotateCcw,
   Sparkles,
   Tag,
   UserRound,
@@ -49,20 +47,6 @@ export type CanvasNodeGenerateOptions = {
   resultTextRole?: CanvasTextRole;
   generationMode?: "single" | "collaborative";
   actionLabel?: string;
-};
-
-export type CanvasTextWorkflowReadiness = {
-  hasNovelSetup: boolean;
-  hasNovelCore: boolean;
-  hasNovelWorld: boolean;
-  hasStoryOutline: boolean;
-  hasVolumeOutline: boolean;
-  hasCharacterCast: boolean;
-  hasCharacterRelation: boolean;
-  hasChapterOutline: boolean;
-  hasSceneOutline: boolean;
-  hasNovelBible: boolean;
-  hasStyleGuide: boolean;
 };
 
 type TextWorkbenchAction = {
@@ -128,23 +112,6 @@ const GENERAL_CONVERT_ACTIONS: TextWorkbenchAction[] = [
     instruction: "请基于当前主题、观点或素材写成一篇结构完整的文章，包含清晰标题、开头、主体段落和结尾，表达自然，不要额外解释。",
   },
   {
-    id: "novel",
-    label: "小说",
-    icon: BookOpen,
-    placement: "create_result",
-    resultTextRole: "novel_setup",
-    generationMode: "collaborative",
-    instruction: "请基于当前文本整理成创作意图，只包含题材类型、目标读者、篇幅目标、叙事视角、情绪基调、核心卖点、平台方向和读者期待。不要写角色总表、世界观设定、故事大纲或正文。",
-  },
-  {
-    id: "outline",
-    label: "大纲",
-    icon: ListTree,
-    placement: "create_result",
-    resultTextRole: "novel_outline",
-    instruction: "请把当前文本整理成创作大纲，包含主题、核心冲突、人物关系、起承转合和后续可展开方向。",
-  },
-  {
     id: "character",
     label: "角色总表",
     icon: UsersRound,
@@ -162,7 +129,7 @@ const GENERAL_CONVERT_ACTIONS: TextWorkbenchAction[] = [
   },
 ];
 
-const TEXT_ACTION_GROUPS: Record<CanvasTextRole, TextActionGroup> = {
+const TEXT_ACTION_GROUPS: Partial<Record<CanvasTextRole, TextActionGroup>> = {
   general: {
     primary: GENERAL_PRIMARY_ACTIONS,
     secondary: GENERAL_CONVERT_ACTIONS,
@@ -183,306 +150,6 @@ const TEXT_ACTION_GROUPS: Record<CanvasTextRole, TextActionGroup> = {
       },
     ],
     secondary: GENERAL_CONVERT_ACTIONS,
-  },
-  novel_setup: {
-    primary: [
-      {
-        id: "setup_complete",
-        label: "补全",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_setup",
-        instruction: "请补全当前创作意图，只补齐类型、目标读者、篇幅目标、叙事视角、情绪基调、核心卖点、平台方向、读者期待和禁区。不要展开角色、世界观、剧情大纲或正文。",
-      },
-      {
-        id: "setup_core",
-        label: "故事核心",
-        icon: BookOpen,
-        placement: "create_result",
-        resultTextRole: "novel_core",
-        generationMode: "collaborative",
-        instruction: "请基于当前创作意图生成故事核心，只定义主线驱动力：一句话故事命题、核心问题、主线目标、主要阻碍类型、关键赌注、冲突升级方式、结局方向和情绪主线。不要写角色总表、世界观设定、章节大纲或正文。",
-      },
-      {
-        id: "setup_cast",
-        label: "角色总表",
-        icon: UsersRound,
-        placement: "create_result",
-        resultTextRole: "character_cast",
-        generationMode: "collaborative",
-        instruction: "请基于当前创作意图生成角色总表，覆盖主要角色、身份、阵营、目标、弱点、剧情功能、与主线关系和彼此的基础连接。不要写世界观、全书大纲、章节大纲或正文。",
-      },
-      {
-        id: "setup_world",
-        label: "世界观",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_world",
-        generationMode: "collaborative",
-        instruction: "请基于当前创作意图生成世界观设定，只定义故事发生的外部规则：时代/空间背景、权力结构、能力或规则体系、社会规则、禁忌代价、主要场景、历史事件和名词表。不要写角色总表、故事大纲或正文。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_core: {
-    primary: [
-      {
-        id: "core_refine",
-        label: "补强",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_core",
-        instruction: "请补强当前故事核心，只强化一句话故事命题、核心问题、主线目标、主要阻碍类型、关键赌注、冲突升级方式、结局方向和情绪主线。不要扩展角色总表、世界观设定、章节大纲或正文。",
-      },
-      {
-        id: "core_cast",
-        label: "角色总表",
-        icon: UsersRound,
-        placement: "create_result",
-        resultTextRole: "character_cast",
-        generationMode: "collaborative",
-        instruction: "请基于当前故事核心生成角色总表，覆盖主要角色、身份、阵营、目标、弱点、剧情功能、与主线关系和彼此基础连接。不要写世界观、全书大纲、章节大纲或正文。",
-      },
-      {
-        id: "core_world",
-        label: "世界观",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_world",
-        generationMode: "collaborative",
-        instruction: "请基于当前故事核心生成世界观设定，只定义故事发生的外部规则：时代/空间背景、权力结构、能力或规则体系、社会规则、禁忌代价、主要场景、历史事件和名词表。不要写角色总表、全书大纲、章节大纲或正文。",
-      },
-      {
-        id: "core_outline",
-        label: "全书大纲",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_outline",
-        generationMode: "collaborative",
-        instruction: "请基于故事核心、角色总表和世界观生成全书大纲，包含全书主线、阶段目标、核心冲突升级、关键转折、人物成长和结局方向。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_world: {
-    primary: [
-      {
-        id: "world_refine",
-        label: "完善",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_world",
-        instruction: "请完善当前世界观设定，只补齐外部规则：时代/空间背景、规则体系、权力结构、禁忌代价、主要场景、历史事件和专有名词表。不要扩展角色总表、全书大纲、章节大纲或正文。",
-      },
-      {
-        id: "world_outline",
-        label: "全书大纲",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_outline",
-        generationMode: "collaborative",
-        instruction: "请基于故事核心、角色总表和当前世界观生成全书大纲，包含全书主线、阶段目标、核心冲突升级、关键转折、人物成长和结局方向。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_outline: {
-    primary: [
-      {
-        id: "outline_refine",
-        label: "完善",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_outline",
-        instruction: "请完善当前全书大纲，强化主线目标、阶段结构、关键转折、冲突升级、人物成长路径、伏笔安排和结局方向，不要额外解释。",
-      },
-      {
-        id: "outline_volumes",
-        label: "分卷大纲",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_volume_outline",
-        generationMode: "collaborative",
-        instruction: "请基于当前全书大纲生成分卷大纲。每卷包含主题、阶段目标、主要冲突、关键转折、人物变化、伏笔推进和卷末钩子。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_volume_outline: {
-    primary: [
-      {
-        id: "volume_refine",
-        label: "细化",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_volume_outline",
-        instruction: "请细化当前分卷大纲，明确每卷目标、主要冲突、关键转折、人物变化、伏笔推进和卷末钩子。",
-      },
-      {
-        id: "volume_chapters",
-        label: "章节大纲",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_chapter_outline",
-        generationMode: "collaborative",
-        instruction: "请基于当前分卷大纲，并结合全书大纲、角色总表、人物关系和世界观，生成章节大纲。每章包含标题、目标、出场人物、关键事件、人物变化、伏笔和结尾钩子。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_chapter_outline: {
-    primary: [
-      {
-        id: "chapter_outline_scene",
-        label: "场景大纲",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_scene_outline",
-        generationMode: "collaborative",
-        instruction: "请基于当前章节大纲拆成场景大纲，每个场景包含场景目标、出场人物、行动推进、尝试失败、线索或反转、情绪变化和悬念收尾。不要写成视频分镜。",
-      },
-      {
-        id: "chapter_outline_write",
-        label: "正文",
-        icon: PenLine,
-        placement: "create_result",
-        resultTextRole: "novel_chapter",
-        generationMode: "collaborative",
-        instruction: "请基于当前章节大纲创作章节正文，强化场景、行动、对白、冲突和结尾钩子。",
-      },
-      {
-        id: "chapter_outline_conflict",
-        label: "细化",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_chapter_outline",
-        instruction: "请强化当前章节大纲的戏剧张力，明确本章人物目标、阻碍、代价、关键转折和结尾悬念，不要额外解释。",
-      },
-      {
-        id: "chapter_outline_next",
-        label: "下章纲",
-        icon: BookOpen,
-        placement: "create_result",
-        resultTextRole: "novel_chapter_outline",
-        generationMode: "collaborative",
-        instruction: "请根据当前章节大纲生成下一章章节大纲，保持主线连续，推进冲突并制造新钩子。",
-      },
-      {
-        id: "chapter_outline_summary",
-        label: "摘要",
-        icon: FileText,
-        placement: "create_result",
-        resultTextRole: "general",
-        instruction: "请把当前章节大纲整理成简短摘要，列出本章目标、关键事件、人物变化和伏笔。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_scene_outline: {
-    primary: [
-      {
-        id: "scene_outline_refine",
-        label: "细化",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_scene_outline",
-        instruction: "请细化当前场景大纲，补强每个场景的目标、动作、阻碍、线索、反转、情绪推进和悬念收尾。不要写成视频分镜。",
-      },
-      {
-        id: "scene_outline_write",
-        label: "正文",
-        icon: PenLine,
-        placement: "create_result",
-        resultTextRole: "novel_chapter",
-        generationMode: "collaborative",
-        instruction: "请基于当前场景大纲创作章节正文，强化场景、行动、对白、冲突推进、人物感受和结尾钩子。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_chapter: {
-    primary: [
-      {
-        id: "chapter_continue",
-        label: "续写",
-        icon: PenLine,
-        placement: "create_result",
-        resultTextRole: "novel_chapter",
-        generationMode: "collaborative",
-        instruction: "请接着当前章节正文继续写下去，保持人物、语气、世界观和叙事节奏，不要重复原文。",
-      },
-      {
-        id: "chapter_polish",
-        label: "润色",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_chapter",
-        instruction: "请润色当前章节正文，强化画面、节奏、人物感受和叙事张力，保留原有情节，不要额外解释。",
-      },
-      {
-        id: "chapter_dialogue",
-        label: "对白",
-        icon: Clapperboard,
-        placement: "update_current",
-        resultTextRole: "novel_chapter",
-        instruction: "请优化当前章节对白，让人物语气更鲜明、信息更自然、冲突更清楚，保留剧情走向。",
-      },
-      {
-        id: "chapter_check",
-        label: "检查",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_bible",
-        generationMode: "collaborative",
-        instruction: "请基于当前章节正文，并结合已有材料，更新小说圣经：人物变化、已埋伏笔、未解决悬念、时间线、重要道具、能力规则和设定冲突。",
-      },
-      {
-        id: "chapter_next",
-        label: "下一章",
-        icon: BookOpen,
-        placement: "create_result",
-        resultTextRole: "novel_chapter",
-        generationMode: "collaborative",
-        instruction: "请基于当前章节正文创作下一章，承接上一章结尾，推进主线、冲突和人物变化。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_bible: {
-    primary: [
-      {
-        id: "bible_update",
-        label: "更新",
-        icon: RotateCcw,
-        placement: "update_current",
-        resultTextRole: "novel_bible",
-        generationMode: "collaborative",
-        instruction: "请更新当前小说圣经，补齐人物设定表、时间线、地点表、伏笔表、道具表、能力规则表、已发生事件摘要和未解决悬念。",
-      },
-      {
-        id: "bible_check",
-        label: "连贯性",
-        icon: Check,
-        placement: "create_result",
-        resultTextRole: "general",
-        generationMode: "collaborative",
-        instruction: "请基于当前小说圣经做连贯性检查，指出人物、时间线、地点、伏笔、道具、能力规则和已发生事件之间的冲突，并给出修正建议。",
-      },
-    ],
-    secondary: [],
-  },
-  novel_style_guide: {
-    primary: [
-      {
-        id: "style_refine",
-        label: "完善",
-        icon: Sparkles,
-        placement: "update_current",
-        resultTextRole: "novel_style_guide",
-        instruction: "请完善当前风格指南，明确句子长短、对白风格、描写密度、叙事节奏、禁用词、高频词、平台尺度和示例表达。",
-      },
-    ],
-    secondary: [],
   },
   character_cast: {
     primary: [
@@ -537,15 +204,6 @@ const TEXT_ACTION_GROUPS: Record<CanvasTextRole, TextActionGroup> = {
         resultTextRole: "character_relation",
         instruction: "请梳理当前人物关系网，补全阵营、利益、情感、秘密、对立点和剧情用途，让关系更清晰可用。",
       },
-      {
-        id: "relation_chapter_outline",
-        label: "章节大纲",
-        icon: ListTree,
-        placement: "create_result",
-        resultTextRole: "novel_chapter_outline",
-        generationMode: "collaborative",
-        instruction: "请基于当前人物关系，并结合已有故事大纲和角色总表，生成章节大纲。每章包含标题、目标、出场人物、关系推进、冲突、关键事件和结尾钩子。",
-      },
     ],
     secondary: [],
   },
@@ -571,15 +229,6 @@ const TEXT_ACTION_GROUPS: Record<CanvasTextRole, TextActionGroup> = {
         placement: "update_current",
         resultTextRole: "scene",
         instruction: "请润色当前场景片段，强化空间感、动作、情绪、对白张力和结尾钩子，保留原有情节方向。",
-      },
-      {
-        id: "scene_chapter",
-        label: "扩正文",
-        icon: BookOpen,
-        placement: "create_result",
-        resultTextRole: "novel_chapter",
-        generationMode: "collaborative",
-        instruction: "请基于当前场景片段扩写成更完整的小说正文，补全场景铺垫、行动、对白、人物感受和叙事张力。",
       },
     ],
     secondary: [],
@@ -682,60 +331,6 @@ function buildActionInstruction(action: TextWorkbenchAction, extra: string): str
   return `${action.instruction}\n\n补充要求：${normalizedExtra}`;
 }
 
-function hasNovelDraftPrerequisites(
-  readiness?: CanvasTextWorkflowReadiness,
-): boolean {
-  return !!(
-    readiness?.hasStoryOutline &&
-    readiness.hasVolumeOutline &&
-    readiness.hasCharacterCast &&
-    readiness.hasChapterOutline
-  );
-}
-
-function hasNovelOutlinePrerequisites(
-  readiness?: CanvasTextWorkflowReadiness,
-): boolean {
-  return !!(
-    readiness?.hasNovelCore &&
-    readiness.hasNovelWorld &&
-    readiness.hasCharacterCast
-  );
-}
-
-function isTextActionAvailable(params: {
-  action: TextWorkbenchAction;
-  sourceRole: CanvasTextRole;
-  readiness?: CanvasTextWorkflowReadiness;
-}): boolean {
-  const { action, sourceRole, readiness } = params;
-
-  if (action.id === "relation_chapter_outline") return false;
-
-  if (action.id === "scene_chapter") return false;
-
-  if (
-    (action.id === "core_outline" || action.id === "world_outline") &&
-    !hasNovelOutlinePrerequisites(readiness)
-  ) {
-    return false;
-  }
-
-  if (action.id === "volume_chapters" && !readiness?.hasStoryOutline) {
-    return false;
-  }
-
-  if (action.resultTextRole !== "novel_chapter") return true;
-
-  if (sourceRole === "novel_chapter") return true;
-
-  if (sourceRole !== "novel_chapter_outline" && sourceRole !== "novel_scene_outline") {
-    return false;
-  }
-
-  return hasNovelDraftPrerequisites(readiness);
-}
-
 export function CanvasNodeEditorPanel({
   element,
   frame,
@@ -747,7 +342,6 @@ export function CanvasNodeEditorPanel({
   onGenerate,
   disabled = false,
   onContextMenu,
-  workflowReadiness,
 }: {
   element: CanvasElement;
   frame: { left: number; top: number; width: number; height: number };
@@ -759,48 +353,16 @@ export function CanvasNodeEditorPanel({
   onGenerate: (options?: CanvasNodeGenerateOptions) => void;
   disabled?: boolean;
   onContextMenu?: (event: MouseEvent<HTMLElement>) => void;
-  workflowReadiness?: CanvasTextWorkflowReadiness;
 }) {
   const isGenerating = element.status === "generating";
   const isFailed = element.status === "failed";
   const isText = element.kind === "text";
   const textRole = isText ? getCanvasTextRole(element.textRole) : "general";
-  const isNovelWorkflowText =
-    isText &&
-    (textRole === "novel_setup" ||
-      textRole === "novel_core" ||
-      textRole === "character_cast" ||
-      textRole === "novel_world" ||
-      textRole === "novel_style_guide" ||
-      textRole === "novel_outline" ||
-      textRole === "novel_volume_outline" ||
-      textRole === "novel_chapter_outline" ||
-      textRole === "novel_chapter");
-  const showTextToolbar = isText && !isNovelWorkflowText;
+  const showTextToolbar = isText;
   const textRoleConfig = getCanvasTextRoleConfig(textRole);
-  const actionGroup = TEXT_ACTION_GROUPS[textRole];
-  const primaryActions = useMemo(
-    () =>
-      actionGroup.primary.filter((action) =>
-        isTextActionAvailable({
-          action,
-          sourceRole: textRole,
-          readiness: workflowReadiness,
-        }),
-      ),
-    [actionGroup.primary, textRole, workflowReadiness],
-  );
-  const secondaryActions = useMemo(
-    () =>
-      actionGroup.secondary.filter((action) =>
-        isTextActionAvailable({
-          action,
-          sourceRole: textRole,
-          readiness: workflowReadiness,
-        }),
-      ),
-    [actionGroup.secondary, textRole, workflowReadiness],
-  );
+  const actionGroup = TEXT_ACTION_GROUPS[textRole] || TEXT_ACTION_GROUPS.general!;
+  const primaryActions = actionGroup.primary;
+  const secondaryActions = actionGroup.secondary;
   const roleActions = useMemo(
     () => [...primaryActions, ...secondaryActions],
     [primaryActions, secondaryActions],
@@ -871,7 +433,7 @@ export function CanvasNodeEditorPanel({
     if (isModelUnavailable) return;
     if (!hasTextInput) return;
 
-    if (!isText || isNovelWorkflowText) {
+    if (!isText) {
       onGenerate();
       return;
     }

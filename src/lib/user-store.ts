@@ -1,16 +1,5 @@
-/**
- * Server-side user store (JSON file-based).
- *
- * For MVP this persists user records in local JSON files.
- * Production can replace the internals with a real database.
- */
-
-import fs from "fs";
-import path from "path";
 import { generateId } from "./id";
-
-const DATA_DIR = path.join(process.cwd(), "data");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
+import { prisma } from "./prisma";
 
 export interface ServerUser {
   id: string;
@@ -23,126 +12,117 @@ export interface ServerUser {
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string;
-  githubId?: string;
-  googleId?: string;
-  phone?: string;
-  phoneVerified?: boolean;
 }
 
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+type UserRow = {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  status: string;
+  passwordHash: string | null;
+  passwordSalt: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt: Date | null;
+};
+
+function toServerUser(row: UserRow): ServerUser {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name || undefined,
+    avatarUrl: row.avatarUrl || undefined,
+    status: row.status === "disabled" ? "disabled" : "active",
+    passwordHash: row.passwordHash || undefined,
+    passwordSalt: row.passwordSalt || undefined,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    lastLoginAt: row.lastLoginAt?.toISOString(),
+  };
 }
 
-function readJsonFile<T>(filePath: string, fallback: T): T {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonFile<T>(filePath: string, data: T): void {
-  ensureDataDir();
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
-}
-
-function readUsers(): ServerUser[] {
-  return readJsonFile<ServerUser[]>(USERS_FILE, []);
-}
-
-function writeUsers(users: ServerUser[]): void {
-  writeJsonFile(USERS_FILE, users);
-}
-
-export function findUserByEmail(email: string): ServerUser | undefined {
+export async function findUserByEmail(email: string): Promise<ServerUser | null> {
   const normalizedEmail = email.toLowerCase();
-  return readUsers().find((user) => user.email.toLowerCase() === normalizedEmail);
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+  });
+
+  return user ? toServerUser(user) : null;
 }
 
-export function findUserById(id: string): ServerUser | undefined {
-  return readUsers().find((user) => user.id === id);
+export async function findUserById(id: string): Promise<ServerUser | null> {
+  const user = await prisma.user.findUnique({
+    where: { id },
+  });
+
+  return user ? toServerUser(user) : null;
 }
 
-export function createUser(params: {
+export async function createUser(params: {
   email: string;
   name?: string;
   passwordHash?: string;
   passwordSalt?: string;
-}): ServerUser {
-  const users = readUsers();
-  const now = new Date().toISOString();
+}): Promise<ServerUser> {
+  const user = await prisma.user.create({
+    data: {
+      id: generateId("user"),
+      email: params.email.toLowerCase(),
+      name: params.name || params.email.split("@")[0],
+      status: "active",
+      passwordHash: params.passwordHash,
+      passwordSalt: params.passwordSalt,
+      lastLoginAt: new Date(),
+    },
+  });
 
-  const user: ServerUser = {
-    id: generateId("user"),
-    email: params.email.toLowerCase(),
-    name: params.name || params.email.split("@")[0],
-    avatarUrl: undefined,
-    status: "active",
-    passwordHash: params.passwordHash,
-    passwordSalt: params.passwordSalt,
-    createdAt: now,
-    updatedAt: now,
-    lastLoginAt: now,
-  };
-
-  users.push(user);
-  writeUsers(users);
-  return user;
+  return toServerUser(user);
 }
 
-export function updateUserLogin(id: string): void {
-  const users = readUsers();
-  const user = users.find((entry) => entry.id === id);
-
-  if (!user) return;
-
-  user.lastLoginAt = new Date().toISOString();
-  user.updatedAt = user.lastLoginAt;
-  writeUsers(users);
+export async function updateUserLogin(id: string): Promise<void> {
+  await prisma.user.updateMany({
+    where: { id },
+    data: {
+      lastLoginAt: new Date(),
+    },
+  });
 }
 
-export function updateUserProfile(
+export async function updateUserProfile(
   id: string,
   updates: { name?: string; avatarUrl?: string },
-): ServerUser | null {
-  const users = readUsers();
-  const user = users.find((entry) => entry.id === id);
+): Promise<ServerUser | null> {
+  const updated = await prisma.user.updateManyAndReturn({
+    where: { id },
+    data: {
+      name: updates.name,
+      avatarUrl: updates.avatarUrl || null,
+    },
+  });
 
-  if (!user) return null;
-
-  if (updates.name !== undefined) {
-    user.name = updates.name;
-  }
-
-  if (updates.avatarUrl !== undefined) {
-    user.avatarUrl = updates.avatarUrl || undefined;
-  }
-
-  user.updatedAt = new Date().toISOString();
-  writeUsers(users);
-  return user;
+  const user = updated[0];
+  return user ? toServerUser(user) : null;
 }
 
-export function setUserPassword(userId: string, hash: string, salt: string): void {
-  const users = readUsers();
-  const user = users.find((entry) => entry.id === userId);
-
-  if (!user) return;
-
-  user.passwordHash = hash;
-  user.passwordSalt = salt;
-  user.updatedAt = new Date().toISOString();
-  writeUsers(users);
-}
-
-export function getUserPassword(
+export async function setUserPassword(
   userId: string,
-): { hash: string; salt: string } | null {
-  const user = findUserById(userId);
+  hash: string,
+  salt: string,
+): Promise<void> {
+  await prisma.user.updateMany({
+    where: { id: userId },
+    data: {
+      passwordHash: hash,
+      passwordSalt: salt,
+    },
+  });
+}
+
+export async function getUserPassword(
+  userId: string,
+): Promise<{ hash: string; salt: string } | null> {
+  const user = await findUserById(userId);
   if (!user?.passwordHash || !user?.passwordSalt) return null;
   return { hash: user.passwordHash, salt: user.passwordSalt };
 }

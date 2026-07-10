@@ -41,6 +41,7 @@ export async function runCanvasMediaNodeGeneration(params: {
   modelEntry: CanvasModelEntry;
   elements: CanvasElement[];
   edges: CanvasSnapshot["edges"];
+  currentProjectId: string | null;
   flowDirection: CanvasFlowDirection;
   commitCanvas: (next: CanvasCommitInput) => void;
   patchElementDraft: (id: string, updates: Partial<CanvasElement>) => void;
@@ -55,6 +56,7 @@ export async function runCanvasMediaNodeGeneration(params: {
     modelEntry,
     elements,
     edges,
+    currentProjectId,
     flowDirection,
     commitCanvas,
     patchElementDraft,
@@ -110,6 +112,7 @@ export async function runCanvasMediaNodeGeneration(params: {
       const patch = await executeCanvasBrainMediaGeneration({
         kind: element.kind,
         prompt,
+        projectId: currentProjectId,
         referenceImageUrls:
           element.kind === "image"
             ? getCanvasReferenceImageUrls([element, ...mediaSourceElements])
@@ -126,7 +129,16 @@ export async function runCanvasMediaNodeGeneration(params: {
         },
       });
 
-      patchElementDraft(resultNode.id, patch);
+      patchElementDraft(resultNode.id, {
+        ...patch,
+        asset: resultNode.asset
+          ? {
+              ...resultNode.asset,
+              status: "ready",
+              modelRef,
+            }
+          : undefined,
+      } as Partial<CanvasElement>);
       appendAiMessage(
         getCanvasBrainDoneMessage({
           kind: element.kind,

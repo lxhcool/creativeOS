@@ -1,30 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ModelGateway } from "@/services/model/gateway";
-import type { ModelGatewayConfig } from "@/services/model/types";
 import { toCanvasTextGenerationErrorMessage } from "../lib/errors";
-
-const providerSchema = z.object({
-  id: z.string().min(1),
-  type: z.enum([
-    "openai",
-    "anthropic",
-    "google",
-    "litellm",
-    "openrouter",
-    "openai_compatible",
-  ]),
-  baseUrl: z.string().min(1),
-  apiKey: z.string().optional(),
-});
-
-const modelSchema = z.object({
-  kind: z.literal("text"),
-  modelName: z.string().min(1),
-  capabilities: z.array(z.string()).default(["text"]),
-  contextWindow: z.number().optional(),
-  maxOutputTokens: z.number().optional(),
-});
+import {
+  buildSingleModelGatewayConfig,
+  canvasProviderSchema,
+  canvasTextModelSchema,
+} from "../lib/modelRequest";
 
 const sourceSchema = z.object({
   kind: z.string(),
@@ -36,8 +18,8 @@ const sourceSchema = z.object({
 const requestSchema = z.object({
   prompt: z.string().min(1),
   current: sourceSchema.optional(),
-  provider: providerSchema,
-  model: modelSchema,
+  provider: canvasProviderSchema,
+  model: canvasTextModelSchema,
   sources: z.array(sourceSchema).default([]),
 });
 
@@ -47,10 +29,6 @@ const intentSchema = z.object({
   instruction: z.string().min(1),
   reason: z.string().optional(),
 });
-
-function toRuntimeProviderType(type: z.infer<typeof providerSchema>["type"]) {
-  return type === "litellm" || type === "openrouter" ? "openai_compatible" : type;
-}
 
 function contentOf(source: z.infer<typeof sourceSchema>): string {
   return source.text || source.prompt || source.label || "";
@@ -88,31 +66,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const config: ModelGatewayConfig = {
-      providers: [
-        {
-          id: body.provider.id,
-          name: body.provider.id,
-          type: toRuntimeProviderType(body.provider.type),
-          enabled: true,
-          baseUrl: body.provider.baseUrl.replace(/\/+$/, ""),
-          apiKey: body.provider.apiKey,
-          models: [
-            {
-              id: body.model.modelName,
-              capabilities: body.model.capabilities as ModelGatewayConfig["providers"][number]["models"][number]["capabilities"],
-              contextWindow: body.model.contextWindow,
-              maxOutputTokens: body.model.maxOutputTokens,
-            },
-          ],
-        },
-      ],
-      routing: {
-        canvas_intent: [`${body.provider.id}:${body.model.modelName}`],
-      },
-    };
-
-    const gateway = new ModelGateway(config);
+    const gateway = new ModelGateway(buildSingleModelGatewayConfig({
+      task: "canvas_intent",
+      provider: body.provider,
+      model: body.model,
+    }));
     const result = await gateway.generateJson({
       task: "canvas_intent",
       schema: intentSchema,

@@ -1,8 +1,10 @@
 export {
   requestCanvasImageGeneration,
   requestCanvasIntent,
+  requestCanvasProjectMemoryExtraction,
   requestCanvasTextGeneration,
   requestCanvasVideoGeneration,
+  writeCanvasProjectMemoryPatches,
 } from "./api/client";
 export {
   buildGenerationPrompt,
@@ -40,7 +42,10 @@ export {
   readBrowserImageSize,
   readBrowserVideoSize,
 } from "./model/executors";
-export type { CanvasActionIntent } from "./model/types";
+export type {
+  CanvasActionIntent,
+  CanvasAssetWorkflowKind,
+} from "./model/types";
 export type {
   CanvasModelEntry,
   CanvasModelOption,

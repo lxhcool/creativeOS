@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model CanvasProject {
+  id           String              @id
+  ownerId      String
+  name         String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  nodeCount    Int
+  edgeCount    Int
+  payload      Json
+  history      CanvasSaveHistory[]
+
+  @@index([ownerId, updatedAt])
+}
+
+model CanvasMemory {
+  id               String   @id
+  ownerId          String
+  projectId        String?
+  scope            String
+  type             String
+  title            String
+  content          Json
+  sourceElementIds String[]
+  confidence       Float    @default(1)
+  importance       Float    @default(0.5)
+  embedding        Float[]  @default([])
+  embeddingModel   String?
+  embeddingUpdatedAt DateTime?
+  accessCount      Int      @default(0)
+  lastAccessedAt   DateTime?
+  status           String   @default("active")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([ownerId, projectId, status, updatedAt])
+  @@index([ownerId, scope, type, status])
+}
+
+model CanvasTask {
+  id          String    @id
+  ownerId     String
+  projectId   String?
+  type        String
+  status      String    @default("pending")
+  payload     Json
+  result      Json?
+  error       String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  runAfter    DateTime  @default(now())
+  lockedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerId, projectId, status, updatedAt])
+  @@index([status, runAfter, updatedAt])
+  @@index([type, status, updatedAt])
+}
+
+model CanvasModelCredential {
+  id              String   @id
+  ownerId         String
+  name            String
+  providerType    String
+  baseUrl         String
+  apiKeyCipher    String
+  apiKeyIv        String
+  apiKeyTag       String
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([ownerId, status, updatedAt])
+  @@index([ownerId, providerType, status])
+}
+
+model CanvasAssetFile {
+  id               String    @id
+  ownerId          String
+  projectId        String?
+  url              String    @unique
+  storageKey       String
+  kind             String
+  mimeType         String
+  size             Int
+  originalName     String?
+  status           String    @default("active")
+  createdAt        DateTime  @default(now())
+  lastReferencedAt DateTime?
+
+  @@index([ownerId, projectId, status])
+  @@index([ownerId, status, createdAt])
+}
+
+model User {
+  id           String    @id
+  email        String    @unique
+  name         String?
+  avatarUrl    String?
+  status       String    @default("active")
+  passwordHash String?
+  passwordSalt String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  @@index([email])
+}
+
+model CanvasSaveHistory {
+  id        String        @id
+  projectId String
+  ownerId   String
+  name      String
+  savedAt   DateTime      @default(now())
+  nodeCount Int
+  edgeCount Int
+  payload   Json
+  project   CanvasProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, projectId, savedAt])
+}

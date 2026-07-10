@@ -10,6 +10,17 @@ export type CanvasSnapshot = {
   edges: CanvasEdge[];
 };
 
+export type CanvasBrainChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  actions?: Array<{
+    id: string;
+    label: string;
+    command: string;
+  }>;
+};
+
 export type CanvasDraftEdge = {
   sourceId: string;
   from: { x: number; y: number };

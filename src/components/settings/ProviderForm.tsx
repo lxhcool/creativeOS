@@ -240,7 +240,7 @@ export function ProviderForm({
             })}
           </div>
           <p className="mt-1.5 text-xs text-white/35">
-            决定这个连接会出现在哪些分类里。自定义 Gateway 请按实际能力勾选。
+            按实际能力选择分类。
           </p>
         </div>
 

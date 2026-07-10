@@ -1,21 +1,21 @@
-# Agent Guidelines
+# 项目协作规范
 
-## UI Theme
+## 界面风格
 
-- Follow the visual language in `src/app/settings/providers/page.tsx` and the settings components.
-- The product UI theme is dark glass, not blue: use `#02070b` / near-black backgrounds, `bg-white/[0.06]` to `bg-white/[0.14]`, `border-white/10`, white text opacity, blur, and black shadows.
-- Do not use blue/sky/accent fills for primary canvas controls unless the user explicitly asks for blue. `--color-accent` exists, but it is not the default product-control theme.
-- Selected states should usually be white glass, for example `bg-white/[0.12] text-white`.
-- Primary action buttons should match `components/ui/Button.tsx` primary styling: white glass, subtle border, hover via higher white opacity.
-- Keep canvas node controls compact and internal to the node: top tools, middle input/content area, bottom model selector plus send action.
-- Use Radix primitives for reusable interaction foundations such as popovers and scroll areas, then style them with the project's dark glass theme instead of ad hoc native dropdowns or scrollbars.
-- Do not use native `alert`, `confirm`, or `prompt` for product interactions. Destructive actions such as deleting a canvas must use a themed confirmation component/modal with explicit cancel and confirm actions.
+- 参考 `src/app/settings/providers/page.tsx` 和设置页组件的视觉语言。
+- 产品界面使用暗色玻璃风格，不使用蓝色作为默认主题。背景优先使用 `#02070b` 或近黑色，面板使用 `bg-white/[0.06]` 到 `bg-white/[0.14]`、`border-white/10`、白色透明文字、模糊和黑色阴影。
+- 除非明确要求蓝色，不要在主要画布控件中使用蓝色、天蓝色或强调色填充。`--color-accent` 可以存在，但不是默认产品控件主题。
+- 选中态通常使用白色玻璃效果，例如 `bg-white/[0.12] text-white`。
+- 主要操作按钮应匹配 `components/ui/Button.tsx` 的 primary 样式：白色玻璃、细边框、悬停时提高白色透明度。
+- 画布节点控件保持紧凑，并放在节点内部：顶部工具区、中间输入或内容区、底部模型选择和发送操作。
+- 可复用交互基础优先使用 Radix primitives，例如 popover 和 scroll area，再按项目暗色玻璃主题定制样式。
+- 产品交互不要使用原生 `alert`、`confirm` 或 `prompt`。删除画布等破坏性操作必须使用项目主题的确认组件或弹窗，并提供明确的取消和确认操作。
 
-## Product Copy
+## 产品文案
 
-- Keep workflow and assistant copy short, direct, and action-oriented.
-- Do not write explanatory onboarding paragraphs that describe the system, for example "这是小说创作工作流总控..." or "你不用先建节点...".
-- Prefer concise prompts such as "说说你的小说想法", "编剧构思中", "下一步：生成角色与场景".
-- Avoid exposing implementation language to users unless it is part of an intentional product concept. Do not casually mention "agent", "strategy", "节点模板", or internal orchestration details in user-facing copy.
-- AI assistant messages may be playful, but should still communicate current status or the next available action.
-- Do not use hard-coded natural-language trigger phrases such as "开始", "继续", "就这个", or numeric replies to drive workflow state. Workflow progression must come from structured state, selected options, canvas context, or model/strategy decisions.
+- 工作流和助手文案保持简短、直接、行动导向。
+- 不写解释系统机制的长段引导文案，例如“这是小说创作工作流总控...”或“你不用先建节点...”。
+- 优先使用简洁提示，例如“说说你的小说想法”“编剧构思中”“下一步：生成角色与场景”。
+- 除非是明确的产品概念，不要在用户可见文案中暴露实现语言。不要随意提到“agent”“strategy”“节点模板”或内部编排细节。
+- 助手消息可以有轻微趣味性，但必须传达当前状态或下一步可执行操作。
+- 不要用硬编码自然语言触发词推进工作流，例如“开始”“继续”“就这个”或数字回复。工作流推进必须来自结构化状态、用户选择、画布上下文或模型决策。

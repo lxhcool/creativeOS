@@ -4,6 +4,7 @@ import {
   createMediaElement,
   createTextElement,
 } from "./factory";
+import { withCanvasAssetMeta } from "./assets";
 import type {
   CanvasEdge,
   CanvasElement,
@@ -53,13 +54,19 @@ export function createTextResultNode(params: {
     meta: params.meta,
   });
 
-  return {
+  return withCanvasAssetMeta({
     ...node,
     text: params.text,
     prompt: params.prompt,
     modelRef: params.modelRef,
     status: "done",
-  };
+  }, {
+    title: params.meta?.title,
+    sourceNodeIds: [params.source.id],
+    version: params.meta?.version,
+    status: "ready",
+    modelRef: params.modelRef,
+  });
 }
 
 export function createResultPlaceholder(params: {
@@ -72,7 +79,7 @@ export function createResultPlaceholder(params: {
   const position = params.position || getResultNodePosition(params.source);
 
   if (params.kind === "image") {
-    return {
+    return withCanvasAssetMeta({
       ...createImageElement({
         position,
         label: "生成任务",
@@ -80,10 +87,15 @@ export function createResultPlaceholder(params: {
       prompt: params.prompt,
       modelRef: params.modelRef,
       status: "generating",
-    };
+    }, {
+      title: "图像资产",
+      sourceNodeIds: [params.source.id],
+      status: "draft",
+      modelRef: params.modelRef,
+    });
   }
 
-  return {
+  return withCanvasAssetMeta({
     ...createMediaElement({
       kind: params.kind,
       position,
@@ -92,7 +104,12 @@ export function createResultPlaceholder(params: {
     prompt: params.prompt,
     modelRef: params.modelRef,
     status: "generating",
-  };
+  }, {
+    title: params.kind === "video" ? "视频资产" : "音频资产",
+    sourceNodeIds: [params.source.id],
+    status: "draft",
+    modelRef: params.modelRef,
+  });
 }
 
 export function appendResultNode(params: {

@@ -16,7 +16,19 @@ export type CanvasArtifactType =
   | "json"
   | "asset_pack";
 
-export type CanvasWorkflowType = "free" | "novel" | "video" | "image";
+export type CanvasAssetStatus = "draft" | "ready" | "exported";
+
+export interface CanvasAssetMeta {
+  id: string;
+  type: CanvasArtifactType;
+  title: string;
+  status: CanvasAssetStatus;
+  version: number;
+  sourceNodeIds: string[];
+  createdAt: string;
+  exportFormats: string[];
+  modelRef?: string;
+}
 
 export type CanvasGenerationStatus = "idle" | "generating" | "done" | "failed";
 export type CanvasTextResultRelationKind = "child" | "sequence" | "support";
@@ -24,16 +36,6 @@ export type CanvasTextResultRelationKind = "child" | "sequence" | "support";
 export type CanvasTextRole =
   | "general"
   | "article"
-  | "novel_setup"
-  | "novel_core"
-  | "novel_world"
-  | "novel_outline"
-  | "novel_volume_outline"
-  | "novel_chapter_outline"
-  | "novel_scene_outline"
-  | "novel_chapter"
-  | "novel_bible"
-  | "novel_style_guide"
   | "character_cast"
   | "character"
   | "character_relation"
@@ -60,12 +62,7 @@ export interface CanvasTextMeta {
   parentNodeId?: string;
   relationKind?: CanvasTextResultRelationKind;
   sourceRunId?: string;
-  workflowProjectId?: string;
-  workflowStageId?: string;
-  workflowBatchId?: string;
-  workflowSequenceNo?: number;
-  workflowLocked?: boolean;
-  agentSummary?: string;
+  assistantSummary?: string;
   continuityNotes?: string[];
   nextHooks?: string[];
   revisions?: CanvasTextRevision[];
@@ -82,6 +79,7 @@ export interface CanvasElementBase {
   prompt?: string;
   modelRef?: string;
   artifactId?: string;
+  asset?: CanvasAssetMeta;
   status?: CanvasGenerationStatus;
   error?: string;
 }
@@ -160,12 +158,37 @@ export type CanvasAssistantMessage = {
   }>;
 };
 
+export type CanvasAssistantSession = {
+  summary: string;
+  lastFocusElementId?: string;
+  updatedAt: string;
+};
+
 export interface CanvasProjectExport {
   version: "1.0.0";
   exportedAt: string;
-  workflowType?: CanvasWorkflowType;
   viewport: CanvasViewport;
   elements: CanvasElement[];
   edges: CanvasEdge[];
   assistantMessages?: CanvasAssistantMessage[];
+  assistantSession?: CanvasAssistantSession;
 }
+
+export type CanvasProjectRecord = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  nodeCount: number;
+  edgeCount: number;
+  assetCount: number;
+};
+
+export type CanvasSaveHistoryItem = {
+  id: string;
+  name: string;
+  savedAt: string;
+  nodeCount: number;
+  edgeCount: number;
+  payload: CanvasProjectExport;
+};

@@ -1,74 +1,76 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  isDataUrl,
+  persistCanvasDataUrlAsset,
+} from "@/lib/canvas-asset-storage";
+import { createCanvasAssetFileRecord } from "@/lib/canvas-asset-file-store";
+import { getSession } from "@/lib/session-store";
 import { ModelGateway } from "@/services/model/gateway";
-import type { ModelGatewayConfig } from "@/services/model/types";
+import type { VideoOutput } from "@/services/model/types";
 import { toCanvasGenerationErrorMessage } from "../lib/errors";
-
-const providerSchema = z.object({
-  id: z.string().min(1),
-  type: z.enum([
-    "openai",
-    "litellm",
-    "openrouter",
-    "openai_compatible",
-  ]),
-  baseUrl: z.string().min(1),
-  apiKey: z.string().optional(),
-});
-
-const modelSchema = z.object({
-  kind: z.literal("video"),
-  modelName: z.string().min(1),
-  capabilities: z.array(z.string()).default(["video"]),
-  endpoint: z.string().optional(),
-  options: z.string().optional(),
-});
+import {
+  buildSingleModelGatewayConfig,
+  canvasProviderSchema,
+  canvasVideoModelSchema,
+} from "../lib/modelRequest";
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
-  provider: providerSchema,
-  model: modelSchema,
+  projectId: z.string().optional(),
+  provider: canvasProviderSchema,
+  model: canvasVideoModelSchema,
 });
 
-function toRuntimeProviderType(type: z.infer<typeof providerSchema>["type"]) {
-  return type === "litellm" || type === "openrouter" ? "openai_compatible" : type;
+async function persistGeneratedVideoIfNeeded(
+  result: VideoOutput,
+  projectId?: string | null,
+): Promise<VideoOutput> {
+  if (!isDataUrl(result.src)) return result;
+
+  const session = await getSession();
+  if (!session) return result;
+
+  const stored = await persistCanvasDataUrlAsset({
+    dataUrl: result.src,
+    userId: session.userId,
+    fallbackMimeType: result.mimeType,
+  });
+  await createCanvasAssetFileRecord({
+    ownerId: `user:${session.userId}`,
+    projectId,
+    url: stored.url,
+    storageKey: stored.storageKey,
+    kind: "video",
+    mimeType: stored.mimeType,
+    size: stored.size,
+  });
+
+  return {
+    ...result,
+    src: stored.url,
+    mimeType: stored.mimeType,
+    metadata: {
+      ...(result.metadata || {}),
+      storedAs: "local_file",
+    },
+  };
 }
 
 export async function POST(request: Request) {
   try {
     const body = requestSchema.parse(await request.json());
-    const modelRef = `${body.provider.id}:${body.model.modelName}`;
-    const config: ModelGatewayConfig = {
-      providers: [
-        {
-          id: body.provider.id,
-          name: body.provider.id,
-          type: toRuntimeProviderType(body.provider.type),
-          enabled: true,
-          baseUrl: body.provider.baseUrl.replace(/\/+$/, ""),
-          apiKey: body.provider.apiKey,
-          models: [
-            {
-              id: body.model.modelName,
-              capabilities: body.model.capabilities as ModelGatewayConfig["providers"][number]["models"][number]["capabilities"],
-              endpoint: body.model.endpoint,
-              options: body.model.options,
-            },
-          ],
-        },
-      ],
-      routing: {
-        canvas_video: [modelRef],
-      },
-    };
-
-    const gateway = new ModelGateway(config);
+    const gateway = new ModelGateway(buildSingleModelGatewayConfig({
+      task: "canvas_video",
+      provider: body.provider,
+      model: body.model,
+    }));
     const result = await gateway.generateVideo({
       task: "canvas_video",
       prompt: body.prompt,
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json(await persistGeneratedVideoIfNeeded(result, body.projectId));
   } catch (error) {
     const message = toCanvasGenerationErrorMessage(error, "video");
     return NextResponse.json({ error: message }, { status: 400 });

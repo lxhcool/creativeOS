@@ -62,6 +62,18 @@ type CanvasNodeBadge = {
   color: string;
 };
 
+const ASSET_STATUS_LABELS = {
+  draft: "草稿",
+  ready: "资产",
+  exported: "已导出",
+} as const;
+
+const ASSET_STATUS_COLORS = {
+  draft: "#fbbf24",
+  ready: "#86efac",
+  exported: "#c4b5fd",
+} as const;
+
 type CanvasElementNodeProps = {
   element: CanvasElement;
   selected: boolean;
@@ -82,16 +94,6 @@ type CanvasElementNodeProps = {
 const TEXT_ROLE_BADGE_COLORS: Record<CanvasTextRole, string> = {
   general: "#e5e7eb",
   article: "#34d399",
-  novel_setup: "#fbbf24",
-  novel_core: "#f97316",
-  novel_world: "#22d3ee",
-  novel_outline: "#a78bfa",
-  novel_volume_outline: "#c084fc",
-  novel_chapter_outline: "#f472b6",
-  novel_scene_outline: "#f0abfc",
-  novel_chapter: "#fb7185",
-  novel_bible: "#e2e8f0",
-  novel_style_guide: "#86efac",
   character_cast: "#fcd34d",
   character: "#f59e0b",
   character_relation: "#fb923c",
@@ -163,7 +165,7 @@ function CanvasElementNode({
     width: element.width,
     height: element.height,
     rotation: element.rotation,
-    draggable: element.kind === "text" ? !element.meta?.workflowLocked : true,
+    draggable: true,
     onClick: element.status === "generating" ? undefined : onSelect,
     onTap: element.status === "generating" ? undefined : onSelect,
     onMouseEnter: onHover,
@@ -250,6 +252,7 @@ function CanvasTextNode({
       selected={selected}
       dragging={dragging}
       badge={badge}
+      asset={element.asset}
       onDblClick={onPreview}
       onDblTap={onPreview}
     >
@@ -274,7 +277,7 @@ function CanvasTextNode({
           wrap="char"
           ellipsis
         />
-      ) : (!selected || element.meta?.workflowLocked) && (
+      ) : !selected && (
         <Group
           clipX={NODE_PADDING + 8}
           clipY={NODE_PADDING + 8}
@@ -473,6 +476,7 @@ function CanvasMediaNode({
         height={element.height}
         selected={selected}
         dragging={dragging}
+        asset={element.asset}
         onMouseMove={revealVideoControls}
         onMouseEnter={revealVideoControls}
       >
@@ -521,6 +525,7 @@ function CanvasMediaNode({
         height={element.height}
         selected={selected}
         dragging={dragging}
+        asset={element.asset}
       >
         <CanvasAudioPlayer element={element} />
       </CanvasNodeShell>
@@ -534,6 +539,7 @@ function CanvasMediaNode({
       height={element.height}
       selected={selected}
       dragging={dragging}
+      asset={element.asset}
     >
       <Text
         x={NODE_PADDING}
@@ -860,6 +866,7 @@ function CanvasImageNode({
         height={element.height}
         selected={selected}
         dragging={dragging}
+        asset={element.asset}
       >
         <KonvaImage
           x={NODE_PADDING}
@@ -884,6 +891,7 @@ function CanvasImageNode({
       height={element.height}
       selected={selected}
       dragging={dragging}
+      asset={element.asset}
     >
       <Text
         x={NODE_PADDING}
@@ -930,6 +938,7 @@ function CanvasTemplateNode({
       height={element.height}
       selected={selected}
       dragging={dragging}
+      asset={element.asset}
     >
       {content || (
         <Text
@@ -970,6 +979,7 @@ function CanvasProcessorNode({
       height={element.height}
       selected={selected}
       dragging={dragging}
+      asset={element.asset}
     >
       <Text
         x={24}
@@ -1078,6 +1088,7 @@ function CanvasNodeShell({
   dragging,
   children,
   badge,
+  asset,
   onDblClick,
   onDblTap,
   onMouseEnter,
@@ -1091,6 +1102,7 @@ function CanvasNodeShell({
   dragging: boolean;
   children: ReactNode;
   badge?: CanvasNodeBadge;
+  asset?: CanvasElement["asset"];
   onDblClick?: () => void;
   onDblTap?: () => void;
   onMouseEnter?: () => void;
@@ -1119,14 +1131,14 @@ function CanvasNodeShell({
       }}
       onMouseMove={() => onMouseMove?.()}
     >
-      {badge && (
+      {(badge || asset) && (
         <Group x={2} y={-24} listening={false}>
           <Circle
             x={5}
             y={10}
             radius={5}
-            fill={badge.color}
-            shadowColor={badge.color}
+            fill={asset ? ASSET_STATUS_COLORS[asset.status] : badge?.color || "#e5e7eb"}
+            shadowColor={asset ? ASSET_STATUS_COLORS[asset.status] : badge?.color || "#e5e7eb"}
             shadowBlur={8}
             shadowOpacity={0.4}
           />
@@ -1134,7 +1146,11 @@ function CanvasNodeShell({
             x={17}
             y={3}
             width={Math.max(80, width - 24)}
-            text={badge.title}
+            text={
+              asset
+                ? `${ASSET_STATUS_LABELS[asset.status]} · ${asset.title}`
+                : badge?.title || ""
+            }
             fill="rgba(255,255,255,0.74)"
             fontSize={12}
             fontStyle="600"

@@ -22,7 +22,7 @@ export default function ProvidersPage() {
   if (status !== "authenticated") {
     return (
       <div className="flex h-screen items-center justify-center bg-bg-primary">
-        <Loader2 className="h-6 w-6 animate-spin text-accent" />
+        <Loader2 className="h-6 w-6 animate-spin text-white/70" />
       </div>
     );
   }

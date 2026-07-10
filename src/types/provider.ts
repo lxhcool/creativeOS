@@ -70,6 +70,7 @@ export interface UserProvider {
   baseUrl: string;
   supportedKinds?: ModelKind[];
   apiKey: string;
+  serverCredentialId?: string;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;

@@ -2,13 +2,10 @@ import { create } from "zustand";
 import type { User } from "@/types";
 import {
   fetchSession,
-  loginWithCode,
   loginWithPassword,
   logoutRequest,
-  registerWithCode,
-  requestAuthCode,
+  registerWithPassword,
   updateProfile,
-  type CodeRequestResponse,
 } from "@/services/auth/client";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
@@ -18,17 +15,11 @@ interface AuthState {
   status: AuthStatus;
   initialized: boolean;
   hydrate: () => Promise<void>;
-  requestCode: (params: {
-    email: string;
-    purpose: "login" | "register";
-  }) => Promise<CodeRequestResponse>;
   loginWithPassword: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
-  loginWithCode: (email: string, code: string) => Promise<{ success: boolean; message?: string }>;
   register: (params: {
     name: string;
     email: string;
     password: string;
-    code: string;
   }) => Promise<{ success: boolean; message?: string }>;
   updateProfile: (params: {
     name: string;
@@ -75,10 +66,6 @@ export const useAuthStore = create<AuthState>()((set) => ({
     });
   },
 
-  requestCode: async ({ email, purpose }) => {
-    return requestAuthCode({ email: email.trim(), purpose });
-  },
-
   loginWithPassword: async (email, password) => {
     const result = await loginWithPassword({
       email: email.trim(),
@@ -94,26 +81,11 @@ export const useAuthStore = create<AuthState>()((set) => ({
     return { success: true };
   },
 
-  loginWithCode: async (email, code) => {
-    const result = await loginWithCode({
-      email: email.trim(),
-      code,
-    });
-
-    if (!result.success) {
-      return { success: false, message: result.message };
-    }
-
-    applyAuthenticatedState(set, result);
-    return { success: true };
-  },
-
-  register: async ({ name, email, password, code }) => {
-    const result = await registerWithCode({
+  register: async ({ name, email, password }) => {
+    const result = await registerWithPassword({
       name: name.trim(),
       email: email.trim(),
       password,
-      code,
     });
 
     if (!result.success) {

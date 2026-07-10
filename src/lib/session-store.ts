@@ -13,7 +13,15 @@ const SESSION_RENEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_SECRET =
   process.env["AUTH_SESSION_SECRET"] ||
   process.env["NEXTAUTH_SECRET"] ||
-  "creativeos-dev-session-secret";
+  getDevSessionSecret();
+
+function getDevSessionSecret(): string {
+  if (process.env["NODE_ENV"] === "production") {
+    throw new Error("AUTH_SESSION_SECRET must be configured in production.");
+  }
+
+  return "creativeos-dev-session-secret";
+}
 
 export interface SessionData {
   id: string;

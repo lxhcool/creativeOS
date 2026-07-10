@@ -7,7 +7,7 @@ import { setTimeout as delay } from "timers/promises";
 const WORKER_HOST = "127.0.0.1";
 const WORKER_START_TIMEOUT_MS = 60_000;
 const WORKER_LOG_PATH = join(
-  process.cwd(),
+  /*turbopackIgnore: true*/ process.cwd(),
   "tools/sprite-video-lab/work/logs/internal-worker.log",
 );
 
@@ -68,7 +68,7 @@ async function waitForWorker(workerOrigin: string): Promise<void> {
 
 function spawnInternalWorker(port: number): ChildProcess {
   const python = process.env.CREATIVEOS_SPRITE_WORKER_PYTHON || "python3";
-  const projectRoot = process.cwd();
+  const projectRoot = /*turbopackIgnore: true*/ process.cwd();
   const serverPath = join(projectRoot, "tools/sprite-video-lab/server.py");
   mkdirSync(join(projectRoot, "tools/sprite-video-lab/work/logs"), { recursive: true });
   const logFd = openSync(WORKER_LOG_PATH, "w");
@@ -140,7 +140,12 @@ export async function getSpriteWorkerOrigin(): Promise<string> {
 
 function currentServerMtime(): number {
   try {
-    return statSync(join(process.cwd(), "tools/sprite-video-lab/server.py")).mtimeMs;
+    return statSync(
+      join(
+        /*turbopackIgnore: true*/ process.cwd(),
+        "tools/sprite-video-lab/server.py",
+      ),
+    ).mtimeMs;
   } catch {
     return 0;
   }

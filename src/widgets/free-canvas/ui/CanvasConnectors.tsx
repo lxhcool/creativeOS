@@ -3,7 +3,6 @@ import Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
 import { Circle, Group, Path, Rect, Text } from "react-konva";
 import type { CanvasElement } from "@/entities/canvas/model/types";
-import type { CanvasWorkflowGroup } from "@/features/canvas-workflows";
 import {
   getConnectorPathData,
   getInputPortPosition,
@@ -67,7 +66,6 @@ export function CanvasConnectionHandle({
 function CanvasEdgeNode({
   source,
   target,
-  groups = [],
   direction = "horizontal",
   selected,
   onSelect,
@@ -75,22 +73,13 @@ function CanvasEdgeNode({
 }: {
   source: CanvasElement;
   target: CanvasElement;
-  groups?: CanvasWorkflowGroup[];
   direction?: CanvasFlowDirection;
   selected: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
-  const sourceGroup = groups.find((group) => group.elementIds.includes(source.id));
-  const targetGroup = groups.find((group) => group.elementIds.includes(target.id));
-  const rawSourcePort = getOutputPortPosition(source, direction);
-  const rawTargetPort = getInputPortPosition(target, direction);
-  const sourcePort = sourceGroup
-    ? getGroupOutputPortPosition(sourceGroup, direction, rawTargetPort)
-    : rawSourcePort;
-  const targetPort = targetGroup
-    ? getGroupInputPortPosition(targetGroup, direction, rawSourcePort)
-    : rawTargetPort;
+  const sourcePort = getOutputPortPosition(source, direction);
+  const targetPort = getInputPortPosition(target, direction);
 
   return (
     <FlowingConnector
@@ -108,54 +97,13 @@ function CanvasEdgeNode({
 }
 
 export const MemoCanvasEdgeNode = memo(
-  CanvasEdgeNode,
+ CanvasEdgeNode,
   (previous, next) =>
     previous.source === next.source &&
     previous.target === next.target &&
-    previous.groups === next.groups &&
     previous.direction === next.direction &&
     previous.selected === next.selected,
 );
-
-function getGroupOutputPortPosition(
-  group: CanvasWorkflowGroup,
-  direction: CanvasFlowDirection,
-  anchor?: { x: number; y: number },
-): { x: number; y: number } {
-  if (direction === "vertical") {
-    return {
-      x: clampToRange(anchor?.x ?? group.x + group.width / 2, group.x, group.x + group.width),
-      y: group.y + group.height + 10,
-    };
-  }
-
-  return {
-    x: group.x + group.width + 10,
-    y: clampToRange(anchor?.y ?? group.y + group.height / 2, group.y, group.y + group.height),
-  };
-}
-
-function getGroupInputPortPosition(
-  group: CanvasWorkflowGroup,
-  direction: CanvasFlowDirection,
-  anchor?: { x: number; y: number },
-): { x: number; y: number } {
-  if (direction === "vertical") {
-    return {
-      x: clampToRange(anchor?.x ?? group.x + group.width / 2, group.x, group.x + group.width),
-      y: group.y - 10,
-    };
-  }
-
-  return {
-    x: group.x - 10,
-    y: clampToRange(anchor?.y ?? group.y + group.height / 2, group.y, group.y + group.height),
-  };
-}
-
-function clampToRange(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 export function DraftEdgeNode({
   edge,

@@ -4,10 +4,10 @@ import { toBrainNodeSummary } from "../lib/material";
 import type {
   CanvasActionIntent,
   CanvasBrainMessage,
+  CanvasBrainMemorySummary,
   CanvasBrainPlan,
-  CanvasCollaborativeTextGenerationParams,
-  CanvasCollaborativeTextGenerationResult,
   CanvasImageGenerationParams,
+  CanvasTextGenerationSource,
   CanvasTextGenerationParams,
   CanvasVideoGenerationParams,
 } from "../model/types";
@@ -61,6 +61,7 @@ export async function requestCanvasTextGeneration(
     body: JSON.stringify({
       prompt: params.prompt,
       current: params.current,
+      projectId: params.projectId || undefined,
       provider: serializeProvider(params.provider),
       model: serializeTextModel(params.model),
       sources: params.sources,
@@ -73,37 +74,6 @@ export async function requestCanvasTextGeneration(
   }
 
   return data.content;
-}
-
-export async function requestCanvasCollaborativeTextGeneration(
-  params: CanvasCollaborativeTextGenerationParams,
-): Promise<CanvasCollaborativeTextGenerationResult> {
-  const response = await fetch("/api/canvas/text-workflow", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      prompt: params.prompt,
-      current: params.current,
-      provider: serializeProvider(params.provider),
-      model: serializeTextModel(params.model),
-      sources: params.sources,
-      resultTextRole: params.resultTextRole,
-    }),
-  });
-
-  const data = (await response.json()) as CanvasCollaborativeTextGenerationResult & {
-    error?: string;
-  };
-  if (!response.ok || !data.content) {
-    throw new Error(data.error || "协作文本生成失败");
-  }
-
-  return {
-    content: data.content,
-    memory: data.memory,
-  };
 }
 
 export async function requestCanvasIntent(
@@ -144,6 +114,7 @@ export async function requestCanvasBrainPlan(params: {
   elements: CanvasElement[];
   edges: CanvasEdge[];
   focusIds: string[];
+  projectId?: string | null;
   provider: UserProvider;
   model: UserModel;
 }): Promise<CanvasBrainPlan> {
@@ -161,6 +132,7 @@ export async function requestCanvasBrainPlan(params: {
         targetId: edge.targetId,
       })),
       focusIds: params.focusIds,
+      projectId: params.projectId || undefined,
       provider: serializeProvider(params.provider),
       model: serializeTextModel(params.model),
     }),
@@ -181,6 +153,9 @@ export async function requestCanvasBrainPlan(params: {
 
   return {
     mode: data.mode,
+    intentType: data.intentType,
+    confidence: data.confidence,
+    assetWorkflow: data.assetWorkflow,
     sourceIds: data.sourceIds || [],
     createdSources: data.createdSources || [],
     outputKind: data.outputKind,
@@ -198,6 +173,7 @@ export async function requestCanvasBrainChat(params: {
   history: CanvasBrainMessage[];
   elements: CanvasElement[];
   focusIds: string[];
+  memories?: CanvasBrainMemorySummary[];
   provider: UserProvider;
   model: UserModel;
 }): Promise<string> {
@@ -218,7 +194,7 @@ export async function requestCanvasBrainChat(params: {
 
   const data = (await response.json()) as { content?: string; error?: string };
   if (!response.ok || !data.content) {
-    throw new Error(data.error || "画布大脑回复失败");
+    throw new Error(data.error || "创作输入回复失败");
   }
 
   return data.content;
@@ -234,6 +210,7 @@ export async function requestCanvasImageGeneration(
     },
     body: JSON.stringify({
       prompt: params.prompt,
+      projectId: params.projectId || undefined,
       referenceImageUrls: params.referenceImageUrls || [],
       provider: serializeProvider(params.provider),
       model: serializeGenerationModel(params.model),
@@ -264,6 +241,7 @@ export async function requestCanvasVideoGeneration(
     },
     body: JSON.stringify({
       prompt: params.prompt,
+      projectId: params.projectId || undefined,
       provider: serializeProvider(params.provider),
       model: serializeGenerationModel(params.model),
     }),
@@ -275,4 +253,86 @@ export async function requestCanvasVideoGeneration(
   }
 
   return data.src;
+}
+
+export async function writeCanvasProjectMemoryPatches(params: {
+  projectId: string;
+  patches: Array<{
+    type:
+      | "project_bible"
+      | "continuity"
+      | "character_state"
+      | "chapter_event_summary"
+      | "note";
+    title: string;
+    content: Record<string, unknown>;
+    sourceElementIds?: string[];
+    confidence?: number;
+    importance?: number;
+  }>;
+}): Promise<void> {
+  const response = await fetch(
+    `/api/canvas/projects/${encodeURIComponent(params.projectId)}/memories`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        patches: params.patches,
+      }),
+    },
+  );
+
+  const data = (await response.json()) as { error?: string };
+  if (!response.ok) {
+    throw new Error(data.error || "项目记忆写入失败");
+  }
+}
+
+export async function requestCanvasProjectMemoryExtraction(params: {
+  projectId: string;
+  kind: "novel_chapter" | "text_asset";
+  chapterId?: string;
+  outlineId?: string;
+  chapterTitle?: string;
+  assetId?: string;
+  assetTitle?: string;
+  current: CanvasTextGenerationSource & { id?: string };
+  sources: Array<CanvasTextGenerationSource & { id?: string }>;
+  provider: UserProvider;
+  model: UserModel;
+}): Promise<number> {
+  const response = await fetch(
+    `/api/canvas/projects/${encodeURIComponent(params.projectId)}/memories/extract`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: params.kind,
+        chapterId: params.chapterId,
+        outlineId: params.outlineId,
+        chapterTitle: params.chapterTitle,
+        assetId: params.assetId,
+        assetTitle: params.assetTitle,
+        current: params.current,
+        sources: params.sources,
+        providerCredentialId: params.provider.serverCredentialId,
+        provider: serializeProvider(params.provider),
+        model: serializeTextModel(params.model),
+      }),
+    },
+  );
+
+  const data = (await response.json()) as {
+    extractedCount?: number;
+    error?: string;
+  };
+  if (!response.ok || typeof data.extractedCount !== "number") {
+    throw new Error(data.error || "项目记忆整理失败");
+  }
+
+  return data.extractedCount;
 }

@@ -5,7 +5,6 @@ import type {
 } from "@/entities/canvas/model/types";
 import type { UserModel, UserProvider } from "@/types/provider";
 import {
-  requestCanvasCollaborativeTextGeneration,
   requestCanvasImageGeneration,
   requestCanvasIntent,
   requestCanvasTextGeneration,
@@ -36,6 +35,7 @@ type CanvasBrainMediaPatchParams = {
 type CanvasBrainMediaGenerationParams = {
   kind: CanvasBrainGeneratedMediaKind;
   prompt: string;
+  projectId?: string | null;
   referenceImageUrls?: string[];
   provider: UserProvider;
   model: UserModel;
@@ -50,6 +50,7 @@ type CanvasBrainTextExecutionParams = {
   prompt: string;
   element: CanvasElement;
   sourceElements: CanvasElement[];
+  projectId?: string | null;
   provider: UserProvider;
   model: UserModel;
   intentOverride?: CanvasActionIntent;
@@ -318,6 +319,7 @@ export async function executeCanvasBrainMediaGeneration(
     params.kind === "image"
       ? await requestCanvasImageGeneration({
           prompt: params.prompt,
+          projectId: params.projectId,
           referenceImageUrls: params.referenceImageUrls,
           provider: params.provider,
           model: params.model,
@@ -326,6 +328,7 @@ export async function executeCanvasBrainMediaGeneration(
         })
       : await requestCanvasVideoGeneration({
           prompt: params.prompt,
+          projectId: params.projectId,
           provider: params.provider,
           model: params.model,
         });
@@ -388,33 +391,19 @@ export async function executeCanvasBrainTextNode(
   const textGenerationParams = {
     prompt: intent.instruction || params.prompt,
     current: toTextGenerationSource(params.element),
+    projectId: params.projectId,
     provider: params.provider,
     model: params.model,
     sources: params.sourceElements.map(toTextGenerationSource),
   };
-  const collaborative =
-    params.generationMode === "collaborative" && params.resultTextRole;
-  const result = collaborative
-    ? await requestCanvasCollaborativeTextGeneration({
-        ...textGenerationParams,
-        resultTextRole: params.resultTextRole!,
-      })
-    : {
-        content: await requestCanvasTextGeneration(textGenerationParams),
-      };
+  const result = {
+    content: await requestCanvasTextGeneration(textGenerationParams),
+  };
 
   return {
     kind: "text",
     intent,
     content: result.content,
     shouldUpdateCurrent: intent.placement === "update_current",
-    meta: result.memory
-      ? {
-          title: result.memory.title,
-          agentSummary: result.memory.summary,
-          continuityNotes: result.memory.continuityNotes,
-          nextHooks: result.memory.nextHooks,
-        }
-      : undefined,
   };
 }

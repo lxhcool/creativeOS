@@ -9,6 +9,8 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  ShieldCheck,
+  UploadCloud,
   Star,
   Trash2,
   XCircle,
@@ -30,10 +32,13 @@ interface ProviderCardProps {
   defaultModelRef?: string;
   isTesting: boolean;
   connectionResult: { type: "success" | "error"; message: string } | null;
+  credentialResult: { type: "success" | "error"; message: string } | null;
+  isSyncingCredential: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onToggle: () => void;
   onTest: () => void;
+  onSyncCredential: () => void;
   onAddModel: () => void;
   onEditModel: (model: UserModel) => void;
   onDeleteModel: (model: UserModel) => void;
@@ -62,10 +67,13 @@ export function ProviderCard({
   defaultModelRef,
   isTesting,
   connectionResult,
+  credentialResult,
+  isSyncingCredential,
   onEdit,
   onDelete,
   onToggle,
   onTest,
+  onSyncCredential,
   onAddModel,
   onEditModel,
   onDeleteModel,
@@ -179,6 +187,37 @@ export function ProviderCard({
         <span className="font-medium">API Key：</span>
         {provider.apiKey ? maskApiKey(provider.apiKey) : "未设置"}
       </div>
+      <div className="mb-3 flex items-center gap-2 text-xs text-white/45">
+        <ShieldCheck className="h-3.5 w-3.5" />
+        <span className="font-medium">服务端：</span>
+        <span className={provider.serverCredentialId ? "text-emerald-200" : "text-white/40"}>
+          {provider.serverCredentialId ? "已保存" : "未保存"}
+        </span>
+        <button
+          type="button"
+          onClick={onSyncCredential}
+          disabled={isSyncingCredential || !provider.apiKey.trim()}
+          className="ml-auto inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.06] px-2 py-1 text-[10px] font-medium text-white/60 transition hover:bg-white/[0.12] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {isSyncingCredential ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <UploadCloud className="h-3 w-3" />
+          )}
+          保存到服务端
+        </button>
+      </div>
+      {credentialResult && (
+        <div
+          className={`mb-3 rounded-md px-3 py-2 text-xs ${
+            credentialResult.type === "success"
+              ? "bg-emerald-300/10 text-emerald-200"
+              : "bg-red-300/10 text-red-200"
+          }`}
+        >
+          {credentialResult.message}
+        </div>
+      )}
       <div className="mb-4 flex items-center gap-2 truncate text-xs text-white/45">
         <Link2 className="h-3.5 w-3.5 shrink-0" />
         <span className="font-medium">接口地址：</span>
@@ -203,7 +242,7 @@ export function ProviderCard({
             <button
               type="button"
               onClick={onAddModel}
-              className="inline-flex items-center gap-1 text-xs font-medium text-sky-200 hover:text-sky-100"
+              className="inline-flex items-center gap-1 text-xs font-medium text-white/65 hover:text-white"
             >
               <Plus className="h-3 w-3" />
               添加

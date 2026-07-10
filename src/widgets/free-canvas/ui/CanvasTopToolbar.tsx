@@ -6,6 +6,7 @@ import {
   FolderOpen,
   History,
   ImageDown,
+  PackageOpen,
   Redo2,
   Save,
   Trash2,
@@ -29,6 +30,7 @@ export function CanvasTopToolbar({
   onDeleteProject,
   onOpenProject,
   onSaveCanvas,
+  onToggleAssets,
   onExportFile,
   onOpenImport,
   onOpenSaveHistory,
@@ -38,6 +40,8 @@ export function CanvasTopToolbar({
   onSetFlowDirection,
   showFlowDirection = true,
   saveHistoryCount,
+  assetCount,
+  assetsOpen,
 }: {
   panelClassName: string;
   canUndo: boolean;
@@ -57,6 +61,7 @@ export function CanvasTopToolbar({
   onDeleteProject: () => void;
   onOpenProject: (projectId: string) => void;
   onSaveCanvas: () => void;
+  onToggleAssets: () => void;
   onExportFile: () => void;
   onOpenImport: () => void;
   onOpenSaveHistory: () => void;
@@ -66,6 +71,8 @@ export function CanvasTopToolbar({
   onSetFlowDirection: (direction: CanvasFlowDirection) => void;
   showFlowDirection?: boolean;
   saveHistoryCount: number;
+  assetCount: number;
+  assetsOpen: boolean;
 }) {
   return (
     <div className={`fixed right-5 top-5 z-20 flex items-center gap-2 rounded-2xl p-2 ${panelClassName}`}>
@@ -101,6 +108,14 @@ export function CanvasTopToolbar({
       </IconAction>
       <IconAction title="保存画布" onClick={onSaveCanvas}>
         <Save className="h-4 w-4" />
+      </IconAction>
+      <IconAction
+        title="资产"
+        onClick={onToggleAssets}
+        active={assetsOpen}
+        badge={assetCount > 0 ? String(Math.min(assetCount, 99)) : undefined}
+      >
+        <PackageOpen className="h-4 w-4" />
       </IconAction>
       {showFlowDirection && (
         <div className="flex h-9 items-center rounded-full border border-white/10 bg-black/[0.18] p-1">
@@ -202,12 +217,14 @@ function IconAction({
   disabled,
   onClick,
   badge,
+  active,
 }: {
   children: ReactNode;
   title: string;
   disabled?: boolean;
   onClick: () => void;
   badge?: string;
+  active?: boolean;
 }) {
   return (
     <button
@@ -215,7 +232,9 @@ function IconAction({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] text-white/65 transition hover:bg-white/[0.14] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15 disabled:cursor-not-allowed disabled:opacity-35"
+      className={`relative flex h-9 w-9 items-center justify-center rounded-full border border-white/10 transition hover:bg-white/[0.14] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15 disabled:cursor-not-allowed disabled:opacity-35 ${
+        active ? "bg-white/[0.14] text-white" : "bg-white/[0.06] text-white/65"
+      }`}
     >
       {children}
       {badge && (

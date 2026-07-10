@@ -4,42 +4,18 @@ import {
 } from "@/entities/canvas/lib/factory";
 import type {
   CanvasAssistantMessage,
+  CanvasAssistantSession,
   CanvasElement,
   CanvasProjectExport,
   CanvasTextElement,
   CanvasViewport,
-  CanvasWorkflowType,
 } from "@/entities/canvas/model/types";
-import { getCanvasWorkflowStrategy } from "@/features/canvas-workflows";
 import { MAX_SCALE, MIN_SCALE } from "../model/constants";
 import type { CanvasFlowDirection } from "./geometry";
 import { clamp } from "./geometry";
 
-const CANVAS_PROJECT_INDEX_KEY = "creativeos.canvas.projects.v1";
 const CANVAS_ACTIVE_PROJECT_ID_KEY = "creativeos.canvas.activeProjectId.v1";
-const CANVAS_PROJECT_STORAGE_PREFIX = "creativeos.canvas.project.v1.";
-const CANVAS_SAVE_HISTORY_PREFIX = "creativeos.canvas.saveHistory.v1.";
 const CANVAS_FLOW_DIRECTION_KEY = "creativeos.canvas.flowDirection.v1";
-export const CANVAS_SAVE_HISTORY_LIMIT = 12;
-
-export type CanvasProjectRecord = {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-  nodeCount: number;
-  edgeCount: number;
-  workflowType?: CanvasWorkflowType;
-};
-
-export type CanvasSaveHistoryItem = {
-  id: string;
-  name: string;
-  savedAt: string;
-  nodeCount: number;
-  edgeCount: number;
-  payload: CanvasProjectExport;
-};
 
 export function downloadFile(filename: string, content: string, mime: string): void {
   const blob = new Blob([content], { type: mime });
@@ -55,34 +31,29 @@ export function createCanvasProjectPayload(params: {
   elements: CanvasElement[];
   edges: CanvasProjectExport["edges"];
   viewport: CanvasViewport;
-  workflowType?: CanvasWorkflowType;
   assistantMessages?: CanvasAssistantMessage[];
+  assistantSession?: CanvasAssistantSession;
 }): CanvasProjectExport {
   return {
     version: "1.0.0",
     exportedAt: new Date().toISOString(),
-    workflowType: params.workflowType || "free",
     viewport: params.viewport,
     elements: params.elements,
     edges: params.edges,
     assistantMessages: params.assistantMessages,
+    assistantSession: params.assistantSession,
   };
 }
 
-export function getNormalizedWorkflowType(value: unknown): CanvasWorkflowType {
-  return value === "novel" || value === "video" || value === "image" ? value : "free";
-}
-
-export function createBlankCanvasProjectPayload(
-  workflowType: CanvasWorkflowType = "free",
-): CanvasProjectExport {
-  const initial = getCanvasWorkflowStrategy(workflowType).initNodes();
-
+export function createBlankCanvasProjectPayload(): CanvasProjectExport {
   return createCanvasProjectPayload({
-    workflowType,
-    elements: initial.elements,
-    edges: initial.edges,
-    viewport: initial.viewport,
+    elements: [],
+    edges: [],
+    viewport: {
+      x: 0,
+      y: 0,
+      scale: 1,
+    },
   });
 }
 
@@ -124,34 +95,6 @@ export function getCanvasProjectName(
   }
 
   return fallback;
-}
-
-export function getCanvasProjectStorageKey(projectId: string): string {
-  return `${CANVAS_PROJECT_STORAGE_PREFIX}${projectId}`;
-}
-
-export function getCanvasProjectHistoryKey(projectId: string): string {
-  return `${CANVAS_SAVE_HISTORY_PREFIX}${projectId}`;
-}
-
-export function createCanvasProjectRecord(params: {
-  id: string;
-  payload: CanvasProjectExport;
-  name?: string;
-  previous?: CanvasProjectRecord;
-}): CanvasProjectRecord {
-  const now = new Date().toISOString();
-  const fallbackName = params.previous?.name || "未命名画布";
-
-  return {
-    id: params.id,
-    name: params.name?.trim() || getCanvasProjectName(params.payload, fallbackName),
-    createdAt: params.previous?.createdAt || now,
-    updatedAt: now,
-    nodeCount: params.payload.elements.length,
-    edgeCount: params.payload.edges.length,
-    workflowType: getNormalizedWorkflowType(params.payload.workflowType),
-  };
 }
 
 export function normalizeCanvasProjectExport(
@@ -205,6 +148,20 @@ export function normalizeCanvasProjectExport(
         })
         .filter((message): message is CanvasAssistantMessage => Boolean(message))
     : undefined;
+  const assistantSession =
+    data.assistantSession &&
+    typeof data.assistantSession === "object" &&
+    typeof data.assistantSession.summary === "string" &&
+    typeof data.assistantSession.updatedAt === "string"
+      ? {
+          summary: data.assistantSession.summary,
+          lastFocusElementId:
+            typeof data.assistantSession.lastFocusElementId === "string"
+              ? data.assistantSession.lastFocusElementId
+              : undefined,
+          updatedAt: data.assistantSession.updatedAt,
+        }
+      : undefined;
 
   return {
     version: "1.0.0",
@@ -218,88 +175,11 @@ export function normalizeCanvasProjectExport(
           ? clamp(data.viewport.scale, MIN_SCALE, MAX_SCALE)
           : 1,
     },
-    workflowType: getNormalizedWorkflowType(data.workflowType),
     elements: importedElements,
     edges: importedEdges,
     assistantMessages,
+    assistantSession,
   };
-}
-
-export function readCanvasProjectFromStorage(key: string): CanvasProjectExport | null {
-  if (typeof window === "undefined") return null;
-
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-    return normalizeCanvasProjectExport(JSON.parse(raw) as Partial<CanvasProjectExport>);
-  } catch (error) {
-    console.warn("Failed to read canvas project", error);
-    return null;
-  }
-}
-
-export function writeCanvasProjectToStorage(
-  key: string,
-  payload: CanvasProjectExport,
-): boolean {
-  if (typeof window === "undefined") return false;
-
-  try {
-    window.localStorage.setItem(key, JSON.stringify(payload));
-    return true;
-  } catch (error) {
-    console.warn("Failed to save canvas project", error);
-    return false;
-  }
-}
-
-export function readCanvasProjectRecords(): CanvasProjectRecord[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(CANVAS_PROJECT_INDEX_KEY);
-    if (!raw) return [];
-    const items = JSON.parse(raw) as CanvasProjectRecord[];
-    if (!Array.isArray(items)) return [];
-
-    return items
-      .map((item): CanvasProjectRecord | null => {
-        if (!item || typeof item !== "object" || typeof item.id !== "string") {
-          return null;
-        }
-
-        return {
-          id: item.id,
-          name:
-            typeof item.name === "string" && item.name.trim()
-              ? item.name.trim()
-              : "未命名画布",
-          createdAt:
-            typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
-          updatedAt:
-            typeof item.updatedAt === "string" ? item.updatedAt : new Date().toISOString(),
-          nodeCount: typeof item.nodeCount === "number" ? item.nodeCount : 0,
-          edgeCount: typeof item.edgeCount === "number" ? item.edgeCount : 0,
-          workflowType: getNormalizedWorkflowType(item.workflowType),
-        };
-      })
-      .filter((item): item is CanvasProjectRecord => Boolean(item));
-  } catch (error) {
-    console.warn("Failed to read canvas projects", error);
-    return [];
-  }
-}
-
-export function writeCanvasProjectRecords(items: CanvasProjectRecord[]): boolean {
-  if (typeof window === "undefined") return false;
-
-  try {
-    window.localStorage.setItem(CANVAS_PROJECT_INDEX_KEY, JSON.stringify(items));
-    return true;
-  } catch (error) {
-    console.warn("Failed to save canvas projects", error);
-    return false;
-  }
 }
 
 export function readActiveCanvasProjectId(): string | null {
@@ -352,69 +232,5 @@ export function removeActiveCanvasProjectId(): void {
     window.localStorage.removeItem(CANVAS_ACTIVE_PROJECT_ID_KEY);
   } catch (error) {
     console.warn("Failed to remove active canvas project", error);
-  }
-}
-
-export function removeCanvasProjectFromStorage(projectId: string): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.removeItem(getCanvasProjectStorageKey(projectId));
-    window.localStorage.removeItem(getCanvasProjectHistoryKey(projectId));
-  } catch (error) {
-    console.warn("Failed to remove canvas project", error);
-  }
-}
-
-export function readCanvasSaveHistory(projectId: string): CanvasSaveHistoryItem[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const raw = window.localStorage.getItem(getCanvasProjectHistoryKey(projectId));
-    if (!raw) return [];
-    const items = JSON.parse(raw) as CanvasSaveHistoryItem[];
-    if (!Array.isArray(items)) return [];
-
-    return items
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const payload = normalizeCanvasProjectExport(item.payload || {});
-        return {
-          id: typeof item.id === "string" ? item.id : getCanvasSaveId(),
-          name:
-            typeof item.name === "string" && item.name.trim()
-              ? item.name.trim()
-              : getCanvasProjectName(payload),
-          savedAt:
-            typeof item.savedAt === "string" ? item.savedAt : new Date().toISOString(),
-          nodeCount:
-            typeof item.nodeCount === "number" ? item.nodeCount : payload.elements.length,
-          edgeCount: typeof item.edgeCount === "number" ? item.edgeCount : payload.edges.length,
-          payload,
-        };
-      })
-      .filter((item): item is CanvasSaveHistoryItem => Boolean(item))
-      .slice(0, CANVAS_SAVE_HISTORY_LIMIT);
-  } catch (error) {
-    console.warn("Failed to read canvas save history", error);
-    return [];
-  }
-}
-
-export function writeCanvasSaveHistory(
-  projectId: string,
-  items: CanvasSaveHistoryItem[],
-): boolean {
-  if (typeof window === "undefined") return false;
-
-  try {
-    window.localStorage.setItem(
-      getCanvasProjectHistoryKey(projectId),
-      JSON.stringify(items.slice(0, CANVAS_SAVE_HISTORY_LIMIT)),
-    );
-    return true;
-  } catch (error) {
-    console.warn("Failed to save canvas history", error);
-    return false;
   }
 }

@@ -17,6 +17,7 @@
 
 import type {
   ChatInput,
+  EmbedInput,
   ImageInput,
   JsonInput,
   TokenUsage,
@@ -315,6 +316,63 @@ export class ModelGateway {
     }
 
     throw new Error(`All video generation models failed. Attempted: ${attemptedModels.join(", ")}`);
+  }
+
+  /**
+   * Text embeddings through the configured embedding-capable provider.
+   */
+  async embed(params: {
+    task: string;
+    texts: string[];
+    signal?: AbortSignal;
+  }): Promise<{ embeddings: number[][]; modelId: string; providerId: string; usage: TokenUsage }> {
+    const modelChain = this.router.route(params.task);
+
+    if (modelChain.length === 0) {
+      throw new Error(`No embedding models available for task: ${params.task}.`);
+    }
+
+    const embedInput: EmbedInput = {
+      texts: params.texts,
+    };
+    const attemptedModels: string[] = [];
+    const failureReasons: string[] = [];
+
+    for (const ref of modelChain) {
+      attemptedModels.push(ref);
+      try {
+        const resolved = this.registry.resolveModel(ref);
+        if (!resolved) throw new Error(`Model not found: ${ref}`);
+        if (!resolved.provider.embed) {
+          throw new Error(
+            `Provider "${resolved.provider.id}" does not support embeddings`,
+          );
+        }
+
+        const result = await resolved.provider.embed(
+          resolved.entry.id,
+          embedInput,
+          params.signal,
+        );
+
+        return {
+          embeddings: result.embeddings,
+          modelId: result.modelId,
+          providerId: resolved.provider.id,
+          usage: result.usage,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[Gateway] Embedding "${ref}" failed: ${message}`);
+        failureReasons.push(`${ref}: ${message}`);
+      }
+    }
+
+    throw new Error(
+      `All embedding models failed. Attempted: ${attemptedModels.join(", ")}${
+        failureReasons.length > 0 ? `. Reasons: ${failureReasons.join(" | ")}` : ""
+      }`,
+    );
   }
 
   /**

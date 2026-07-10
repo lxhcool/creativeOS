@@ -207,7 +207,7 @@ export function ModelForm({
                     onClick={() => toggleCapability(capability.id)}
                     className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                       capabilities.includes(capability.id)
-                        ? "border-accent/50 bg-accent/20 text-accent"
+                        ? "border-white/20 bg-white/[0.12] text-white"
                         : "border-white/10 bg-black/[0.18] text-text-muted hover:border-border-light"
                     }`}
                   >
@@ -255,7 +255,7 @@ export function ModelForm({
               required
             />
             <Input
-              label="Gateway 模型参数 JSON"
+              label="模型参数 JSON"
               placeholder={
                 effectiveKind === "image"
                   ? '{"size":"1024x1024","quality":"high"}'

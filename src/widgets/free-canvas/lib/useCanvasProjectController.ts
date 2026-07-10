@@ -1,174 +1,47 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createCanvasEdge } from "@/entities/canvas/lib/factory";
-import { getCanvasTextRole } from "@/entities/canvas/lib/textRoles";
-import { getCanvasWorkflowStrategy } from "@/features/canvas-workflows";
 import type {
   CanvasEdge,
   CanvasElement,
   CanvasProjectExport,
+  CanvasProjectRecord,
+  CanvasSaveHistoryItem,
   CanvasTextElement,
-  CanvasTextRole,
   CanvasViewport,
-  CanvasWorkflowType,
 } from "@/entities/canvas/model/types";
-import type { CanvasDraftEdge, CanvasSnapshot } from "../model/types";
+import { getCanvasTextTitle } from "@/entities/canvas/lib/textRoles";
 import {
-  CANVAS_SAVE_HISTORY_LIMIT,
-  createBlankCanvasProjectPayload,
+  addCanvasSaveHistory as addCanvasSaveHistoryRequest,
+  deleteCanvasProject as deleteCanvasProjectRequest,
+  deleteCanvasSaveHistoryItem as deleteCanvasSaveHistoryItemRequest,
+  listCanvasProjects,
+  listCanvasSaveHistory,
+  loadCanvasProject,
+  saveCanvasProject,
+} from "@/entities/canvas/lib/projectApi";
+import type {
+  CanvasBrainChatMessage,
+  CanvasDraftEdge,
+  CanvasSnapshot,
+} from "../model/types";
+import {
   createCanvasProjectPayload,
-  createCanvasProjectRecord,
   downloadFile,
   getCanvasProjectFilename,
-  getCanvasProjectId,
   getCanvasProjectName,
-  getCanvasProjectStorageKey,
   getCanvasSaveId,
-  getNormalizedWorkflowType,
   normalizeCanvasProjectExport,
   readActiveCanvasProjectId,
-  readCanvasProjectFromStorage,
-  readCanvasProjectRecords,
-  readCanvasSaveHistory,
   removeActiveCanvasProjectId,
-  removeCanvasProjectFromStorage,
   writeActiveCanvasProjectId,
-  writeCanvasProjectRecords,
-  writeCanvasProjectToStorage,
-  writeCanvasSaveHistory,
-  type CanvasProjectRecord,
-  type CanvasSaveHistoryItem,
 } from "./canvasProjectStorage";
-import type { CanvasBrainChatMessage } from "../ui/CanvasBrainPanel";
 
 type CanvasCommitInput =
   | { elements?: CanvasElement[]; edges?: CanvasEdge[] }
   | ((current: CanvasSnapshot) => { elements?: CanvasElement[]; edges?: CanvasEdge[] });
 
-const NOVEL_RESTORE_LAYOUT: Partial<Record<CanvasTextRole, { x: number; y: number }>> = {
-  novel_setup: { x: -915, y: -760 },
-  novel_core: { x: -915, y: 0 },
-  character_cast: { x: -305, y: 0 },
-  novel_world: { x: 305, y: 0 },
-  novel_style_guide: { x: 915, y: 0 },
-  novel_outline: { x: -915, y: 560 },
-  novel_volume_outline: { x: -915, y: 1120 },
-  novel_chapter_outline: { x: -915, y: 1680 },
-  novel_chapter: { x: -915, y: 2240 },
-};
-
-const NOVEL_RESTORE_ROLES = new Set(Object.keys(NOVEL_RESTORE_LAYOUT) as CanvasTextRole[]);
-
 function getMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function getElementCenter(element: CanvasElement): { x: number; y: number } {
-  return {
-    x: element.x + element.width / 2,
-    y: element.y + element.height / 2,
-  };
-}
-
-function getFirstTextByRole(
-  elements: CanvasElement[],
-  role: CanvasTextRole,
-): CanvasTextElement | undefined {
-  return elements.find(
-    (element): element is CanvasTextElement =>
-      element.kind === "text" && getCanvasTextRole(element.textRole) === role,
-  );
-}
-
-function createNovelRestoreEdge(
-  source: CanvasTextElement | undefined,
-  target: CanvasTextElement | undefined,
-): CanvasEdge[] {
-  if (!source || !target) return [];
-  return [
-    createCanvasEdge({
-      sourceId: source.id,
-      targetId: target.id,
-    }),
-  ];
-}
-
-function migrateNovelCanvasLayout(params: {
-  elements: CanvasElement[];
-  edges: CanvasEdge[];
-  workflowType: CanvasWorkflowType;
-}): { elements: CanvasElement[]; edges: CanvasEdge[] } {
-  if (params.workflowType !== "novel") return params;
-
-  const setup = getFirstTextByRole(params.elements, "novel_setup");
-  const fallback = params.elements.find(
-    (element): element is CanvasTextElement =>
-      element.kind === "text" && NOVEL_RESTORE_ROLES.has(getCanvasTextRole(element.textRole)),
-  );
-  const anchor = setup || fallback;
-  if (!anchor) return params;
-
-  const anchorRole = getCanvasTextRole(anchor.textRole);
-  const anchorOffset = NOVEL_RESTORE_LAYOUT[anchorRole] || NOVEL_RESTORE_LAYOUT.novel_setup!;
-  const anchorCenter = getElementCenter(anchor);
-  const baseCenter = {
-    x: anchorCenter.x - anchorOffset.x,
-    y: anchorCenter.y - anchorOffset.y,
-  };
-
-  const elements = params.elements.map((element) => {
-    if (element.kind !== "text") return element;
-    const role = getCanvasTextRole(element.textRole);
-    const offset = NOVEL_RESTORE_LAYOUT[role];
-    if (!offset) return element;
-
-    return {
-      ...element,
-      x: baseCenter.x + offset.x - element.width / 2,
-      y: baseCenter.y + offset.y - element.height / 2,
-      meta: {
-        ...(element.meta || {}),
-        workflowLocked: true,
-      },
-    } satisfies CanvasTextElement;
-  });
-
-  const byRole = (role: CanvasTextRole) => getFirstTextByRole(elements, role);
-  const migratedIds = new Set(
-    elements
-      .filter(
-        (element): element is CanvasTextElement =>
-          element.kind === "text" && NOVEL_RESTORE_ROLES.has(getCanvasTextRole(element.textRole)),
-      )
-      .map((element) => element.id),
-  );
-  const foundationTarget =
-    byRole("character_cast") ||
-    byRole("novel_core") ||
-    byRole("novel_world") ||
-    byRole("novel_style_guide");
-
-  const workflowEdges = [
-    ...createNovelRestoreEdge(byRole("novel_setup"), foundationTarget),
-    ...createNovelRestoreEdge(foundationTarget, byRole("novel_outline")),
-    ...createNovelRestoreEdge(byRole("novel_outline"), byRole("novel_volume_outline")),
-    ...createNovelRestoreEdge(byRole("novel_volume_outline"), byRole("novel_chapter_outline")),
-    ...createNovelRestoreEdge(byRole("novel_chapter_outline"), byRole("novel_chapter")),
-  ];
-  const edgeKeys = new Set<string>();
-  const edges = [
-    ...params.edges.filter(
-      (edge) => !(migratedIds.has(edge.sourceId) && migratedIds.has(edge.targetId)),
-    ),
-    ...workflowEdges,
-  ].filter((edge) => {
-    const key = `${edge.sourceId}:${edge.targetId}`;
-    if (edgeKeys.has(key)) return false;
-    edgeKeys.add(key);
-    return true;
-  });
-
-  return { elements, edges };
 }
 
 export function useCanvasProjectController(params: {
@@ -176,6 +49,7 @@ export function useCanvasProjectController(params: {
   edges: CanvasEdge[];
   viewport: CanvasViewport;
   aiMessages: CanvasBrainChatMessage[];
+  selectedId: string | null;
   commitCanvas: (next: CanvasCommitInput) => void;
   setElements: (elements: CanvasElement[]) => void;
   setEdges: (edges: CanvasEdge[]) => void;
@@ -183,7 +57,6 @@ export function useCanvasProjectController(params: {
   setSelectedId: (id: string | null) => void;
   setSelectedEdgeId: (id: string | null) => void;
   setDraftEdge: (edge: CanvasDraftEdge | null) => void;
-  setChatOpen: (open: boolean) => void;
   setAiMessages: (messages: CanvasBrainChatMessage[]) => void;
   showCanvasSaveStatus: (message: string) => void;
 }) {
@@ -193,6 +66,7 @@ export function useCanvasProjectController(params: {
     edges,
     viewport,
     aiMessages,
+    selectedId,
     commitCanvas,
     setElements,
     setEdges,
@@ -200,20 +74,13 @@ export function useCanvasProjectController(params: {
     setSelectedId,
     setSelectedEdgeId,
     setDraftEdge,
-    setChatOpen,
     setAiMessages,
     showCanvasSaveStatus,
   } = params;
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectRecord[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [currentWorkflowType, setCurrentWorkflowType] =
-    useState<CanvasWorkflowType>("free");
   const [saveHistory, setSaveHistory] = useState<CanvasSaveHistoryItem[]>([]);
   const [saveHistoryOpen, setSaveHistoryOpen] = useState(false);
-  const [projectNameOpen, setProjectNameOpen] = useState(false);
-  const [projectNameDraft, setProjectNameDraft] = useState("");
-  const [projectWorkflowDraft, setProjectWorkflowDraft] =
-    useState<CanvasWorkflowType>("free");
   const [deleteProjectConfirmOpen, setDeleteProjectConfirmOpen] = useState(false);
   const canvasStorageHydratedRef = useRef(false);
 
@@ -221,81 +88,102 @@ export function useCanvasProjectController(params: {
     ? canvasProjects.find((project) => project.id === currentProjectId) || null
     : null;
 
+  const createAssistantSessionSummary = useCallback(() => {
+    const recentMessages = aiMessages
+      .filter((message) => message.content.trim())
+      .slice(-8)
+      .map((message) => `${message.role === "user" ? "用户" : "系统"}：${message.content.trim()}`);
+    const assetTitles = elements
+      .filter((element) => Boolean(element.asset))
+      .slice(-12)
+      .map((element) => element.asset?.title)
+      .filter((title): title is string => Boolean(title?.trim()));
+    const selectedElement = selectedId
+      ? elements.find((element) => element.id === selectedId) || null
+      : null;
+    const selectedTitle =
+      selectedElement?.asset?.title ||
+      (selectedElement?.kind === "text"
+        ? getCanvasTextTitle(selectedElement as CanvasTextElement)
+        : undefined);
+
+    return [
+      recentMessages.length > 0 ? `最近沟通：\n${recentMessages.join("\n")}` : "",
+      assetTitles.length > 0 ? `近期资产：${assetTitles.join("、")}` : "",
+      selectedTitle ? `上次焦点：${selectedTitle}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 2400);
+  }, [aiMessages, elements, selectedId]);
+
   const createCurrentCanvasPayload = useCallback(
     () =>
       createCanvasProjectPayload({
         elements,
         edges,
         viewport,
-        workflowType: currentWorkflowType,
         assistantMessages: aiMessages.map((message) => ({
           role: message.role,
           content: message.content,
           actions: message.actions,
         })),
+        assistantSession: {
+          summary: createAssistantSessionSummary(),
+          lastFocusElementId: selectedId || undefined,
+          updatedAt: new Date().toISOString(),
+        },
       }),
-    [aiMessages, currentWorkflowType, edges, elements, viewport],
+    [aiMessages, createAssistantSessionSummary, edges, elements, selectedId, viewport],
   );
 
   const persistProjectRecord = useCallback(
-    (projectId: string, payload: CanvasProjectExport, name?: string) => {
-      const savedProject = writeCanvasProjectToStorage(
-        getCanvasProjectStorageKey(projectId),
-        payload,
-      );
-      if (!savedProject) return false;
-
-      setCanvasProjects((current) => {
-        const existing = current.find((project) => project.id === projectId);
-        const record = createCanvasProjectRecord({
+    async (projectId: string, payload: CanvasProjectExport, name?: string) => {
+      try {
+        const record = await saveCanvasProject({
           id: projectId,
           payload,
           name,
-          previous: existing,
         });
-        const next = [
+
+        setCanvasProjects((current) => [
           record,
           ...current.filter((project) => project.id !== projectId),
         ].sort(
           (a, b) =>
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-        );
-        writeCanvasProjectRecords(next);
-        return next;
-      });
+        ));
 
-      return true;
+        return true;
+      } catch (error) {
+        console.warn("Failed to persist canvas project", error);
+        return false;
+      }
     },
     [],
   );
 
   const addCanvasSaveHistory = useCallback(
-    (payload: CanvasProjectExport, name?: string) => {
+    async (payload: CanvasProjectExport, name?: string) => {
       if (!currentProjectId) return null;
 
-      const item: CanvasSaveHistoryItem = {
-        id: getCanvasSaveId(),
-        name: name?.trim() || getCanvasProjectName(payload),
-        savedAt: new Date().toISOString(),
-        nodeCount: payload.elements.length,
-        edgeCount: payload.edges.length,
-        payload,
-      };
-
-      setSaveHistory((current) => {
-        const next = [
+      try {
+        const item = await addCanvasSaveHistoryRequest({
+          projectId: currentProjectId,
+          id: getCanvasSaveId(),
+          payload,
+          name: name?.trim() || getCanvasProjectName(payload),
+        });
+        setSaveHistory((current) => [
           item,
           ...current.filter((historyItem) => historyItem.id !== item.id),
-        ].slice(0, CANVAS_SAVE_HISTORY_LIMIT);
-        const saved = writeCanvasSaveHistory(currentProjectId, next);
-        if (!saved) {
-          showCanvasSaveStatus("保存记录空间不足，可导出到本地文件");
-          return current;
-        }
-        return next;
-      });
-
-      return item;
+        ]);
+        return item;
+      } catch (error) {
+        console.warn("Failed to add canvas save history", error);
+        showCanvasSaveStatus("保存记录写入失败，可导出到本地文件");
+        return null;
+      }
     },
     [currentProjectId, showCanvasSaveStatus],
   );
@@ -306,27 +194,17 @@ export function useCanvasProjectController(params: {
       options?: { projectId?: string; useHistory?: boolean },
     ) => {
       const normalized = normalizeCanvasProjectExport(payload);
-      const normalizedWorkflowType = getNormalizedWorkflowType(normalized.workflowType);
-      const migrated = migrateNovelCanvasLayout({
-        elements: normalized.elements,
-        edges: normalized.edges,
-        workflowType: normalizedWorkflowType,
-      });
-      const restoredAssistantConfig =
-        getCanvasWorkflowStrategy(normalizedWorkflowType).getAIAssistantConfig();
 
       if (options?.useHistory) {
         commitCanvas({
-          elements: migrated.elements,
-          edges: migrated.edges,
+          elements: normalized.elements,
+          edges: normalized.edges,
         });
       } else {
-        setElements(migrated.elements);
-        setEdges(migrated.edges);
+        setElements(normalized.elements);
+        setEdges(normalized.edges);
       }
       setViewport(normalized.viewport);
-      setCurrentWorkflowType(normalizedWorkflowType);
-      setChatOpen(restoredAssistantConfig.defaultOpen);
       setSelectedId(null);
       setSelectedEdgeId(null);
       setDraftEdge(null);
@@ -342,27 +220,32 @@ export function useCanvasProjectController(params: {
               {
                 id: getMessageId(),
                 role: "assistant",
-                content: restoredAssistantConfig.initialMessage,
+                content: normalized.assistantSession?.summary
+                  ? "已恢复上次画布上下文，可以继续输入。"
+                  : "说说你想创作什么，或选中节点后继续调整。",
               },
             ],
       );
+      if (normalized.assistantSession?.lastFocusElementId) {
+        const focusExists = normalized.elements.some(
+          (element) => element.id === normalized.assistantSession?.lastFocusElementId,
+        );
+        if (focusExists) {
+          setSelectedId(normalized.assistantSession.lastFocusElementId);
+        }
+      }
       if (options?.projectId) {
         writeActiveCanvasProjectId(options.projectId);
-        writeCanvasProjectToStorage(
-          getCanvasProjectStorageKey(options.projectId),
-          {
-            ...normalized,
-            elements: migrated.elements,
-            edges: migrated.edges,
-          },
-        );
+        void saveCanvasProject({
+          id: options.projectId,
+          payload: normalized,
+        });
       }
       return true;
     },
     [
       commitCanvas,
       setAiMessages,
-      setChatOpen,
       setDraftEdge,
       setEdges,
       setElements,
@@ -372,16 +255,16 @@ export function useCanvasProjectController(params: {
     ],
   );
 
-  const saveCurrentCanvas = useCallback(() => {
+  const saveCurrentCanvas = useCallback(async () => {
     if (!currentProjectId) return;
     const payload = createCurrentCanvasPayload();
-    const savedCurrent = persistProjectRecord(currentProjectId, payload);
+    const savedCurrent = await persistProjectRecord(currentProjectId, payload);
     if (!savedCurrent) {
-      showCanvasSaveStatus("保存失败，本地空间不足");
+      showCanvasSaveStatus("保存失败，请稍后重试");
       return;
     }
 
-    addCanvasSaveHistory(payload);
+    await addCanvasSaveHistory(payload);
     showCanvasSaveStatus("已保存，回到首页再进入会自动恢复");
   }, [
     addCanvasSaveHistory,
@@ -391,14 +274,19 @@ export function useCanvasProjectController(params: {
     showCanvasSaveStatus,
   ]);
 
-  const deleteCanvasSaveHistoryItem = useCallback((id: string) => {
+  const deleteCanvasSaveHistoryItem = useCallback(async (id: string) => {
     if (!currentProjectId) return;
-    setSaveHistory((current) => {
-      const next = current.filter((item) => item.id !== id);
-      writeCanvasSaveHistory(currentProjectId, next);
-      return next;
-    });
-  }, [currentProjectId]);
+    try {
+      await deleteCanvasSaveHistoryItemRequest({
+        projectId: currentProjectId,
+        historyId: id,
+      });
+      setSaveHistory((current) => current.filter((item) => item.id !== id));
+    } catch (error) {
+      console.warn("Failed to delete canvas save history", error);
+      showCanvasSaveStatus("保存记录删除失败");
+    }
+  }, [currentProjectId, showCanvasSaveStatus]);
 
   const downloadCanvasProject = useCallback((payload: CanvasProjectExport) => {
     downloadFile(
@@ -409,21 +297,24 @@ export function useCanvasProjectController(params: {
   }, []);
 
   const openCanvasProject = useCallback(
-    (projectId: string) => {
+    async (projectId: string) => {
       if (projectId === currentProjectId) return;
 
       if (currentProjectId) {
-        persistProjectRecord(currentProjectId, createCurrentCanvasPayload());
+        await persistProjectRecord(currentProjectId, createCurrentCanvasPayload());
       }
 
-      const payload =
-        readCanvasProjectFromStorage(getCanvasProjectStorageKey(projectId)) ||
-        createBlankCanvasProjectPayload();
-      restoreCanvasProject(payload, { projectId });
-      setCurrentProjectId(projectId);
-      setSaveHistory(readCanvasSaveHistory(projectId));
-      writeActiveCanvasProjectId(projectId);
-      showCanvasSaveStatus("已切换画布");
+      try {
+        const project = await loadCanvasProject(projectId);
+        restoreCanvasProject(project.payload, { projectId });
+        setCurrentProjectId(projectId);
+        setSaveHistory(await listCanvasSaveHistory(projectId));
+        writeActiveCanvasProjectId(projectId);
+        showCanvasSaveStatus("已切换画布");
+      } catch (error) {
+        console.warn("Failed to open canvas project", error);
+        showCanvasSaveStatus("画布打开失败");
+      }
     },
     [
       createCurrentCanvasPayload,
@@ -434,96 +325,78 @@ export function useCanvasProjectController(params: {
     ],
   );
 
-  const createNewCanvasProject = useCallback(
-    (name: string, workflowType: CanvasWorkflowType) => {
-      const normalizedName = name.trim();
-      if (!normalizedName) return;
-
-      if (currentProjectId) {
-        persistProjectRecord(currentProjectId, createCurrentCanvasPayload());
-      }
-
-      const projectId = getCanvasProjectId();
-      const payload = createBlankCanvasProjectPayload(workflowType);
-      persistProjectRecord(projectId, payload, normalizedName);
-      restoreCanvasProject(payload, { projectId });
-      setCurrentProjectId(projectId);
-      setSaveHistory([]);
-      writeCanvasSaveHistory(projectId, []);
-      writeActiveCanvasProjectId(projectId);
-      showCanvasSaveStatus("已新建画布");
-    },
-    [
-      createCurrentCanvasPayload,
-      currentProjectId,
-      persistProjectRecord,
-      restoreCanvasProject,
-      showCanvasSaveStatus,
-    ],
-  );
-
-  const deleteCurrentCanvasProject = useCallback(() => {
+  const deleteCurrentCanvasProject = useCallback(async () => {
     if (!currentProjectId) return;
-    const nextProjects = canvasProjects.filter((project) => project.id !== currentProjectId);
-    removeCanvasProjectFromStorage(currentProjectId);
-    removeActiveCanvasProjectId();
-    writeCanvasProjectRecords(nextProjects);
-    setCanvasProjects(nextProjects);
-    setCurrentProjectId(null);
-    setSaveHistory([]);
-    router.push("/");
-  }, [canvasProjects, currentProjectId, router]);
-
-  const submitProjectName = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const normalizedName = projectNameDraft.trim();
-      if (!normalizedName) return;
-
-      createNewCanvasProject(normalizedName, projectWorkflowDraft);
-      setProjectNameDraft("");
-      setProjectWorkflowDraft("free");
-      setProjectNameOpen(false);
-    },
-    [createNewCanvasProject, projectNameDraft, projectWorkflowDraft],
-  );
+    try {
+      await deleteCanvasProjectRequest(currentProjectId);
+      const nextProjects = canvasProjects.filter((project) => project.id !== currentProjectId);
+      removeActiveCanvasProjectId();
+      setCanvasProjects(nextProjects);
+      setCurrentProjectId(null);
+      setSaveHistory([]);
+      router.push("/");
+    } catch (error) {
+      console.warn("Failed to delete canvas project", error);
+      showCanvasSaveStatus("画布删除失败");
+    }
+  }, [canvasProjects, currentProjectId, router, showCanvasSaveStatus]);
 
   useEffect(() => {
-    const projects = readCanvasProjectRecords();
-    if (projects.length === 0) {
-      removeActiveCanvasProjectId();
-      router.replace("/");
-      return;
+    let disposed = false;
+
+    async function hydrateCanvasProject() {
+      try {
+        const projects = await listCanvasProjects();
+        if (disposed) return;
+        if (projects.length === 0) {
+          removeActiveCanvasProjectId();
+          showCanvasSaveStatus("先新建画布");
+          router.replace("/");
+          return;
+        }
+
+        const storedActiveId = readActiveCanvasProjectId();
+        const activeProject =
+          projects.find((project) => project.id === storedActiveId) || projects[0];
+        if (!activeProject) {
+          removeActiveCanvasProjectId();
+          router.replace("/");
+          return;
+        }
+
+        const loaded = await loadCanvasProject(activeProject.id);
+        const history = await listCanvasSaveHistory(activeProject.id);
+        if (disposed) return;
+
+        setCanvasProjects(projects);
+        setCurrentProjectId(activeProject.id);
+        setSaveHistory(history);
+        restoreCanvasProject(loaded.payload, { projectId: activeProject.id });
+        writeActiveCanvasProjectId(activeProject.id);
+        canvasStorageHydratedRef.current = true;
+      } catch (error) {
+        console.warn("Failed to hydrate canvas project", error);
+        if (!disposed) {
+          removeActiveCanvasProjectId();
+          showCanvasSaveStatus("请先登录");
+          router.replace("/");
+        }
+      }
     }
 
-    const storedActiveId = readActiveCanvasProjectId();
-    const activeProject =
-      projects.find((project) => project.id === storedActiveId) || projects[0];
-    if (!activeProject) {
-      removeActiveCanvasProjectId();
-      router.replace("/");
-      return;
-    }
+    void hydrateCanvasProject();
 
-    const activeProjectId = activeProject.id;
-    const activePayload =
-      readCanvasProjectFromStorage(getCanvasProjectStorageKey(activeProjectId)) ||
-      createBlankCanvasProjectPayload();
-
-    setCanvasProjects(projects);
-    setCurrentProjectId(activeProjectId);
-    setSaveHistory(readCanvasSaveHistory(activeProjectId));
-    restoreCanvasProject(activePayload, { projectId: activeProjectId });
-    writeActiveCanvasProjectId(activeProjectId);
-    canvasStorageHydratedRef.current = true;
-  }, [restoreCanvasProject, router]);
+    return () => {
+      disposed = true;
+    };
+  }, [restoreCanvasProject, router, showCanvasSaveStatus]);
 
   useEffect(() => {
     if (!canvasStorageHydratedRef.current) return;
     if (!currentProjectId) return;
 
     const timer = setTimeout(() => {
-      persistProjectRecord(currentProjectId, createCurrentCanvasPayload());
+      void persistProjectRecord(currentProjectId, createCurrentCanvasPayload());
     }, 500);
 
     return () => clearTimeout(timer);
@@ -533,17 +406,9 @@ export function useCanvasProjectController(params: {
     canvasProjects,
     currentProject,
     currentProjectId,
-    currentWorkflowType,
-    setCurrentWorkflowType,
     saveHistory,
     saveHistoryOpen,
     setSaveHistoryOpen,
-    projectNameOpen,
-    setProjectNameOpen,
-    projectNameDraft,
-    setProjectNameDraft,
-    projectWorkflowDraft,
-    setProjectWorkflowDraft,
     deleteProjectConfirmOpen,
     setDeleteProjectConfirmOpen,
     createCurrentCanvasPayload,
@@ -554,9 +419,7 @@ export function useCanvasProjectController(params: {
     deleteCanvasSaveHistoryItem,
     downloadCanvasProject,
     openCanvasProject,
-    createNewCanvasProject,
     deleteCurrentCanvasProject,
-    submitProjectName,
     setCurrentProjectId,
     setSaveHistory,
   };

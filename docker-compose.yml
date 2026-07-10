@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: creativeos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: creativeos
+      POSTGRES_USER: creativeos
+      POSTGRES_PASSWORD: creativeos
+    ports:
+      - "5432:5432"
+    volumes:
+      - creativeos-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creativeos -d creativeos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  creativeos-postgres-data:

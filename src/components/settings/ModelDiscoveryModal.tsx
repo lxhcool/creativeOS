@@ -97,7 +97,7 @@ export function ModelDiscoveryModal({
           </span>
           <button
             type="button"
-            className="text-sky-200 hover:text-sky-100"
+            className="text-white/65 hover:text-white"
             disabled={filteredModels.length === 0}
             onClick={() =>
               setSelected(

@@ -15,13 +15,6 @@ import {
   type CanvasActionIntent,
   type CanvasModelEntry,
 } from "@/features/canvas-brain";
-import {
-  findCompletedTextElementByRole,
-  getCanvasTextGenerationBlockReason,
-  getCanvasTextWorkflowReadiness,
-  getChapterOutlineContextSources,
-  mergeUniqueCanvasElements,
-} from "@/features/canvas-workflows";
 import { createCanvasEdge } from "@/entities/canvas/lib/factory";
 import {
   appendResultNodeFromSources,
@@ -55,7 +48,6 @@ import {
   getCanvasTextResultRelationKind,
   getNextTextChapterNo,
   getNextTextResultVersion,
-  NOVEL_REQUIRED_OUTLINE_SUPPORT_MATERIALS,
 } from "./textResultLayout";
 
 export type CanvasExecutionOptions = {
@@ -123,12 +115,22 @@ function createCanvasAgentRunId(): string {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function mergeUniqueCanvasElements(elements: Array<CanvasElement | null | undefined>): CanvasElement[] {
+  const byId = new Map<string, CanvasElement>();
+  elements.forEach((element) => {
+    if (!element) return;
+    byId.set(element.id, element);
+  });
+  return Array.from(byId.values());
+}
+
 export async function runCanvasTextNodeGeneration(params: {
   element: CanvasTextElement;
   prompt: string;
   options?: CanvasExecutionOptions;
   elements: CanvasElement[];
   edges: CanvasEdge[];
+  currentProjectId: string | null;
   flowDirection: CanvasFlowDirection;
   getModelEntryByRef: (
     modelRef: string | undefined,
@@ -148,6 +150,7 @@ export async function runCanvasTextNodeGeneration(params: {
     options,
     elements,
     edges,
+    currentProjectId,
     flowDirection,
     getModelEntryByRef,
     getModelEntryForKind,
@@ -159,8 +162,8 @@ export async function runCanvasTextNodeGeneration(params: {
     appendAiMessage,
   } = params;
 
-  let workingElements = options?.baseElements || elements;
-  let workingEdges = options?.baseEdges || edges;
+  const workingElements = options?.baseElements || elements;
+  const workingEdges = options?.baseEdges || edges;
   const modelEntry = getModelEntryByRef(element.modelRef, "text");
   const modelRef = modelEntry?.ref || "";
 
@@ -173,9 +176,6 @@ export async function runCanvasTextNodeGeneration(params: {
     appendAiMessage(message);
     return;
   }
-  const textProvider = modelEntry.provider;
-  const textModel = modelEntry.model;
-
   const shouldCreatePendingTextResult =
     options?.intentOverride?.outputKind === "text" &&
     options.intentOverride.placement === "create_result";
@@ -183,239 +183,21 @@ export async function runCanvasTextNodeGeneration(params: {
     options?.resultTextRole || getCanvasTextRole(element.textRole);
   const pendingSourceRole = getCanvasTextRole(element.textRole);
 
-  const generateRequiredTextMaterial = async (materialParams: {
-    source: CanvasTextElement;
-    extraSources?: CanvasElement[];
-    role: CanvasTextRole;
-    title: string;
-    actionId: string;
-    instruction: string;
-  }): Promise<CanvasTextElement> => {
-    const existing = findCompletedTextElementByRole(
-      workingElements,
-      materialParams.role,
-    );
-    if (existing) return existing;
-
-    const relationKind = getCanvasTextResultRelationKind({
-      source: materialParams.source,
-      resultTextRole: materialParams.role,
-      actionId: materialParams.actionId,
-    });
-    const roleConfig = getCanvasTextRoleConfig(materialParams.role);
-    const sourceRole = getCanvasTextRole(materialParams.source.textRole);
-    const baseMeta: CanvasTextMeta = {
-      title: materialParams.title,
-      version: 1,
-      sourceNodeId: materialParams.source.id,
-      sourceRole,
-      parentNodeId: getCanvasTextResultParentNodeId({
-        source: materialParams.source,
-        relationKind,
-      }),
-      relationKind,
-      sourceRunId: createCanvasAgentRunId(),
-    };
-    const requiredNode = {
-      ...createTextResultNode({
-        source: materialParams.source,
-        text: "",
-        prompt: materialParams.instruction,
-        modelRef,
-        position: getCanvasTextResultPosition({
-          elements: workingElements,
-          edges: workingEdges,
-          source: materialParams.source,
-          resultTextRole: materialParams.role,
-          actionId: materialParams.actionId,
-          flowDirection,
-        }),
-        textRole: materialParams.role,
-        meta: baseMeta,
-      }),
-      status: "generating",
-    } satisfies CanvasTextElement;
-    const requiredSources = mergeUniqueCanvasElements([
-      materialParams.source,
-      ...(materialParams.extraSources || []),
-    ]);
-    const baseWorkingElements = workingElements;
-    const baseWorkingEdges = workingEdges;
-    const plannedWithPending = appendResultNodeFromSources({
-      elements: baseWorkingElements,
-      edges: baseWorkingEdges,
-      sources: requiredSources,
-      result: requiredNode,
-    });
-    workingElements = plannedWithPending.elements;
-    workingEdges = plannedWithPending.edges;
-    commitCanvas((current) =>
-      appendResultNodeFromSources({
-        elements: mergeElementsWithUpdates({
-          currentElements: current.elements,
-          plannedElements: baseWorkingElements,
-        }),
-        edges: mergeCanvasEdges(current.edges, workingEdges),
-        sources: requiredSources,
-        result: requiredNode,
-      }),
-    );
-
-    const execution = await executeCanvasBrainTextNode({
-      prompt: materialParams.instruction,
-      element: materialParams.source,
-      sourceElements: materialParams.extraSources || [],
-      provider: textProvider,
-      model: textModel,
-      intentOverride: {
-        outputKind: "text",
-        placement: "create_result",
-        instruction: materialParams.instruction,
-      },
-      resultTextRole: materialParams.role,
-      generationMode: "collaborative",
-    });
-
-    if (execution.kind !== "text") {
-      const errorMessage =
-        execution.kind === "empty-material"
-          ? execution.message
-          : "必需材料生成失败，请重试。";
-      workingElements = workingElements.map((item) =>
-        item.id === requiredNode.id
-          ? ({ ...item, status: "failed", error: errorMessage } as CanvasElement)
-          : item,
-      );
-      commitCanvas((current) => ({
-        elements: mergeElementsWithUpdates({
-          currentElements: current.elements,
-          plannedElements: workingElements,
-        }),
-        edges: mergeCanvasEdges(current.edges, workingEdges),
-      }));
-      throw new Error(errorMessage);
-    }
-
-    const doneNode = {
-      ...requiredNode,
-      text: execution.content,
-      meta: {
-        ...baseMeta,
-        ...(execution.meta || {}),
-        title: execution.meta?.title || baseMeta.title || roleConfig.title,
-      },
-      status: "done",
-      error: undefined,
-    } satisfies CanvasTextElement;
-    workingElements = workingElements.map((item) =>
-      item.id === doneNode.id ? doneNode : item,
-    );
-    commitCanvas((current) => ({
-      elements: mergeElementsWithUpdates({
-        currentElements: current.elements,
-        plannedElements: workingElements,
-        updatesById: new Map([[doneNode.id, doneNode]]),
-      }),
-      edges: current.edges,
-    }));
-
-    return doneNode;
-  };
-
-  const requiredContextSources: CanvasElement[] = [];
-  if (
-    options?.actionId === "volume_chapters" &&
-    pendingSourceRole === "novel_volume_outline" &&
-    pendingTextRole === "novel_chapter_outline"
-  ) {
-    try {
-      appendAiMessage("先补齐人物关系和核心角色卡。");
-      const characterCast = findCompletedTextElementByRole(
-        workingElements,
-        "character_cast",
-      );
-      if (!characterCast) {
-        appendAiMessage(
-          "章节大纲前缺少角色总表。请在右下角小说工作流助手中先补齐基础设定组。",
-        );
-        return;
-      }
-
-      const storyOutline = findCompletedTextElementByRole(
-        workingElements,
-        "novel_outline",
-      );
-      const world = findCompletedTextElementByRole(workingElements, "novel_world");
-
-      for (const material of NOVEL_REQUIRED_OUTLINE_SUPPORT_MATERIALS) {
-        await generateRequiredTextMaterial({
-          source: characterCast,
-          extraSources: [element, storyOutline, world].filter(
-            (source): source is CanvasTextElement => Boolean(source),
-          ),
-          role: material.role,
-          title: material.title,
-          actionId: material.actionId,
-          instruction: material.instruction,
-        });
-      }
-      requiredContextSources.push(characterCast);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "必需角色材料生成失败，请重试。";
-      appendAiMessage(message);
-      return;
-    }
-  }
-
-  const chapterOutlineContextSources =
-    pendingTextRole === "novel_chapter_outline" &&
-    pendingSourceRole !== "novel_chapter_outline"
-      ? getChapterOutlineContextSources({
-          elements: workingElements,
-          sourceId: element.id,
-        })
-      : [];
   const sourceElements = resolveCanvasExecutionSources({
     targetId: element.id,
     elements: workingElements,
     edges: workingEdges,
     extraSourceIds: options?.extraSourceIds,
-    extraSourceElements: mergeUniqueCanvasElements([
-      ...(options?.extraSourceElements || []),
-      ...requiredContextSources,
-      ...chapterOutlineContextSources,
-    ]),
+    extraSourceElements: mergeUniqueCanvasElements(options?.extraSourceElements || []),
   });
   const textResultSourceElements = mergeUniqueCanvasElements([
     element,
-    ...requiredContextSources,
-    ...chapterOutlineContextSources,
   ]);
-  const textGenerationBlockReason = getCanvasTextGenerationBlockReason({
-    source: element,
-    resultTextRole: pendingTextRole,
-    actionId: options?.actionId,
-    readiness: getCanvasTextWorkflowReadiness(workingElements),
-  });
-
-  if (textGenerationBlockReason) {
-    appendAiMessage(textGenerationBlockReason);
-    return;
-  }
 
   const pendingTextRoleConfig = getCanvasTextRoleConfig(pendingTextRole);
   const pendingTextPrompt = options?.intentOverride?.instruction || prompt;
   const pendingTextTitle =
-    options?.actionLabel &&
-    (
-      pendingTextRole === "character" ||
-      pendingTextRole === "character_cast" ||
-      pendingTextRole === "character_relation" ||
-      pendingTextRole === "character_arc" ||
-      pendingTextRole === "scene" ||
-      pendingSourceRole === "character"
-    )
+    options?.actionLabel
       ? options.actionLabel
       : pendingTextRoleConfig.title;
   const pendingTextRelationKind = getCanvasTextResultRelationKind({
@@ -567,6 +349,7 @@ export async function runCanvasTextNodeGeneration(params: {
       prompt,
       element,
       sourceElements,
+      projectId: currentProjectId,
       provider: modelEntry.provider,
       model: modelEntry.model,
       intentOverride: options?.intentOverride,
@@ -654,6 +437,7 @@ export async function runCanvasTextNodeGeneration(params: {
           const patch = await executeCanvasBrainMediaGeneration({
             kind: "image",
             prompt: execution.generationPrompt,
+            projectId: currentProjectId,
             referenceImageUrls: getCanvasReferenceImageUrls([
               element,
               ...sourceElements,
@@ -703,6 +487,7 @@ export async function runCanvasTextNodeGeneration(params: {
           const patch = await executeCanvasBrainMediaGeneration({
             kind: "video",
             prompt: execution.generationPrompt,
+            projectId: currentProjectId,
             provider: outputModelEntry.provider,
             model: outputModelEntry.model,
             element: resultNode,
@@ -803,6 +588,17 @@ export async function runCanvasTextNodeGeneration(params: {
                     pendingTextBaseMeta?.title ||
                     pendingTextRoleConfig.title,
                 },
+                asset: pendingTextResultNode.asset
+                  ? {
+                      ...pendingTextResultNode.asset,
+                      title:
+                        execution.meta?.title ||
+                        pendingTextBaseMeta?.title ||
+                        pendingTextRoleConfig.title,
+                      status: "ready",
+                      modelRef,
+                    }
+                  : undefined,
                 status: "done",
                 error: undefined,
               } as Partial<CanvasElement>,

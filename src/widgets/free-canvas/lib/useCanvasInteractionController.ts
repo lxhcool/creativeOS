@@ -14,9 +14,7 @@ import type {
   CanvasElement,
   CanvasTextElement,
   CanvasViewport,
-  CanvasWorkflowType,
 } from "@/entities/canvas/model/types";
-import { getCanvasWorkflowStrategy } from "@/features/canvas-workflows";
 import type { CanvasDraftEdge, CanvasSnapshot } from "../model/types";
 import { MAX_SCALE, MIN_SCALE } from "../model/constants";
 import {
@@ -69,8 +67,6 @@ export function useCanvasInteractionController(params: {
   deleteEdge: (id: string) => void;
   undo: () => void;
   redo: () => void;
-  isFixedWorkflow: boolean;
-  workflowType: CanvasWorkflowType;
   appendAssistantMessage: (content: string) => void;
 }) {
   const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -350,22 +346,6 @@ export function useCanvasInteractionController(params: {
               }),
             ],
           });
-          if (params.isFixedWorkflow) {
-            const source = params.elements.find(
-              (element) => element.id === activeDraftEdge.sourceId,
-            );
-            const assessment = source
-              ? getCanvasWorkflowStrategy(params.workflowType).assessConnection({
-                  source,
-                  target,
-                  elements: params.elements,
-                  edges: params.edges,
-                })
-              : null;
-            if (assessment) {
-              params.appendAssistantMessage(assessment.message);
-            }
-          }
         }
       }
 

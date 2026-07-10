@@ -1,9 +1,6 @@
-import { type FormEvent, type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import { Eye, FileDown, RotateCcw, Trash2, X } from "lucide-react";
-import { Group, Rect, Text } from "react-konva";
-import { CANVAS_WORKFLOW_OPTIONS, type CanvasWorkflowGroup } from "@/features/canvas-workflows";
-import type { CanvasProjectExport, CanvasWorkflowType } from "@/entities/canvas/model/types";
-import { DEFAULT_NODE_HEIGHT, DEFAULT_NODE_WIDTH } from "../model/constants";
+import type { CanvasProjectExport } from "@/entities/canvas/model/types";
 
 type CanvasSaveHistoryItem = {
   id: string;
@@ -21,7 +18,9 @@ export function CanvasNodeContextMenu({
   viewportHeight,
   title,
   canPreview,
+  canExport,
   onPreview,
+  onExport,
   onDelete,
   onClose,
 }: {
@@ -31,12 +30,14 @@ export function CanvasNodeContextMenu({
   viewportHeight: number;
   title: string;
   canPreview?: boolean;
+  canExport?: boolean;
   onPreview?: () => void;
+  onExport?: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   const menuWidth = 184;
-  const menuHeight = canPreview ? 140 : 96;
+  const menuHeight = 96 + (canPreview ? 44 : 0) + (canExport ? 44 : 0);
   const left = Math.min(Math.max(8, x), Math.max(8, viewportWidth - menuWidth - 8));
   const top = Math.min(Math.max(8, y), Math.max(8, viewportHeight - menuHeight - 8));
 
@@ -67,6 +68,16 @@ export function CanvasNodeContextMenu({
           预览内容
         </button>
       )}
+      {canExport && onExport && (
+        <button
+          type="button"
+          onClick={onExport}
+          className="flex h-10 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold text-white/78 transition-colors duration-200 hover:bg-white/[0.1] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15"
+        >
+          <FileDown className="h-4 w-4 shrink-0" />
+          导出资产
+        </button>
+      )}
       <button
         type="button"
         onClick={onDelete}
@@ -76,48 +87,6 @@ export function CanvasNodeContextMenu({
         删除节点
       </button>
     </div>
-  );
-}
-
-export function CanvasWorkflowGroupNode({ group }: { group: CanvasWorkflowGroup }) {
-  return (
-    <Group listening={false}>
-      <Rect
-        x={group.x}
-        y={group.y}
-        width={Math.max(group.width, DEFAULT_NODE_WIDTH + 96)}
-        height={Math.max(group.height, DEFAULT_NODE_HEIGHT + 118)}
-        cornerRadius={24}
-        fill="rgba(255,255,255,0.022)"
-        stroke="rgba(255,255,255,0)"
-        strokeWidth={0}
-        shadowColor={group.color}
-        shadowBlur={34}
-        shadowOpacity={0.08}
-      />
-      <Group x={group.x + 4} y={group.y - 34} listening={false}>
-        <Rect
-          x={0}
-          y={0}
-          width={112}
-          height={24}
-          cornerRadius={12}
-          fill="rgba(2,7,11,0.78)"
-          stroke="rgba(255,255,255,0)"
-          strokeWidth={0}
-        />
-        <Rect x={11} y={8} width={8} height={8} cornerRadius={2} fill={group.color} />
-        <Text
-          x={28}
-          y={6}
-          text={group.title}
-          fontSize={12}
-          fontStyle="600"
-          fill="rgba(255,255,255,0.72)"
-          listening={false}
-        />
-      </Group>
-    </Group>
   );
 }
 
@@ -189,105 +158,6 @@ export function CanvasConfirmModal({
           </button>
         </div>
       </section>
-    </div>
-  );
-}
-
-export function CanvasProjectNameModal({
-  value,
-  workflowType,
-  onChange,
-  onWorkflowTypeChange,
-  onSubmit,
-  onClose,
-}: {
-  value: string;
-  workflowType: CanvasWorkflowType;
-  onChange: (value: string) => void;
-  onWorkflowTypeChange: (value: CanvasWorkflowType) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onClose: () => void;
-}) {
-  const normalizedValue = value.trim();
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/42 px-5 py-7 backdrop-blur-[6px]"
-      onMouseDown={onClose}
-    >
-      <form
-        onSubmit={onSubmit}
-        className="w-[min(420px,calc(100vw-40px))] rounded-[18px] border border-white/[0.1] bg-[#02070b]/[0.96] p-5 text-white shadow-[0_28px_80px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(255,255,255,0.07)]"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-[15px] font-semibold text-white/90">新建画布</h2>
-            <p className="mt-1 text-[12px] text-white/42">给这次创作取一个容易识别的名称。</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/58 transition-colors duration-200 hover:bg-white/[0.1] hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15"
-            aria-label="关闭新建画布"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <label className="block">
-          <span className="mb-2 block text-xs font-medium text-white/55">画布名称</span>
-          <input
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            autoFocus
-            maxLength={40}
-            className="h-11 w-full rounded-2xl border border-white/10 bg-black/[0.22] px-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-white/25"
-            placeholder="例如：大明重生小说设定"
-          />
-        </label>
-        <div className="mt-4">
-          <div className="mb-2 text-xs font-medium text-white/55">创作工作流</div>
-          <div className="grid grid-cols-2 gap-2">
-            {CANVAS_WORKFLOW_OPTIONS.map((option) => {
-              const selected = option.type === workflowType;
-
-              return (
-                <button
-                  key={option.type}
-                  type="button"
-                  onClick={() => onWorkflowTypeChange(option.type)}
-                  className={`rounded-2xl border px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/15 ${
-                    selected
-                      ? "border-white/[0.18] bg-white/[0.12] text-white shadow-lg shadow-black/20"
-                      : "border-white/[0.08] bg-white/[0.05] text-white/62 hover:border-white/[0.14] hover:bg-white/[0.09] hover:text-white/86"
-                  }`}
-                >
-                  <div className="text-[13px] font-semibold">{option.label}</div>
-                  <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-white/42">
-                    {option.description}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <button
-          type="submit"
-          disabled={!normalizedValue}
-          className="mt-5 h-11 w-full cursor-pointer rounded-full border border-white/[0.14] bg-white/[0.13] text-sm font-medium text-white transition hover:bg-white/[0.18] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          创建并进入
-        </button>
-      </form>
     </div>
   );
 }

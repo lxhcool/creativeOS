@@ -56,6 +56,7 @@ export function ProviderCenter() {
     addProvider,
     updateProvider,
     removeProvider,
+    syncProviderCredentialToServer,
     setProviderEnabled,
     addModel,
     updateModel,
@@ -86,6 +87,10 @@ export function ProviderCenter() {
   );
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [syncingCredentialId, setSyncingCredentialId] = useState<string | null>(null);
+  const [credentialResults, setCredentialResults] = useState<
+    Record<string, ConnectionBanner>
+  >({});
 
   useEffect(() => {
     void loadProviders();
@@ -304,6 +309,33 @@ export function ProviderCenter() {
     [discoverProviderModels, providers],
   );
 
+  const handleSyncCredential = useCallback(
+    async (id: string) => {
+      setSyncingCredentialId(id);
+      try {
+        await syncProviderCredentialToServer(id);
+        setCredentialResults((state) => ({
+          ...state,
+          [id]: {
+            type: "success",
+            message: "服务端已保存",
+          },
+        }));
+      } catch (error) {
+        setCredentialResults((state) => ({
+          ...state,
+          [id]: {
+            type: "error",
+            message: error instanceof Error ? error.message : "保存失败",
+          },
+        }));
+      } finally {
+        setSyncingCredentialId(null);
+      }
+    },
+    [syncProviderCredentialToServer],
+  );
+
   const handleAddModel = useCallback((providerId: string) => {
     setEditingModel(undefined);
     setModelFormProviderId(providerId);
@@ -429,7 +461,7 @@ export function ProviderCenter() {
   if (!isLoaded) {
     return (
       <div className="flex flex-1 items-center justify-center p-12">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/45 border-t-transparent" />
       </div>
     );
   }
@@ -440,13 +472,13 @@ export function ProviderCenter() {
         <div className="flex flex-wrap items-end justify-between gap-5">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-white/35">
-              Model Gateway
+              模型配置
             </p>
             <h1 className="mt-4 text-4xl font-semibold tracking-[0.04em] text-white drop-shadow-2xl sm:text-6xl">
               大模型配置
             </h1>
             <p className="mt-5 max-w-2xl text-sm leading-7 text-white/[0.58] sm:text-base">
-              通过 LiteLLM、OpenRouter 或兼容 Gateway 管理模型。每个分类可配置多个模型，并选择一个实时生效的默认模型。
+              配置文本、图像和视频模型，选择默认模型。
             </p>
           </div>
           <Button
@@ -512,8 +544,8 @@ export function ProviderCenter() {
             </h3>
             <p className="mt-2 text-sm text-white/50">
               {activeKind === "text"
-                ? "添加第一个文本模型供应商后，这里会展示它的密钥、连接状态和模型列表。"
-                : "纯文本连接不会展示在这里。切换到文本模型分类，或添加支持当前分类的 Gateway。"}
+                ? "添加供应商后可配置模型。"
+                : "切换分类，或添加支持当前分类的连接。"}
             </p>
           </div>
         ) : (
@@ -529,6 +561,8 @@ export function ProviderCenter() {
                 defaultModelRef={defaultModels[activeKind]}
                 isTesting={testingId === provider.id}
                 connectionResult={testResults[provider.id] || null}
+                credentialResult={credentialResults[provider.id] || null}
+                isSyncingCredential={syncingCredentialId === provider.id}
                 onEdit={() => {
                   setEditingProvider(provider);
                   setProviderFormOpen(true);
@@ -536,6 +570,7 @@ export function ProviderCenter() {
                 onDelete={() => handleDeleteProvider(provider)}
                 onToggle={() => void handleToggleProvider(provider.id)}
                 onTest={() => void handleTestConnection(provider.id)}
+                onSyncCredential={() => void handleSyncCredential(provider.id)}
                 onAddModel={() => handleAddModel(provider.id)}
                 onEditModel={handleEditModel}
                 onDeleteModel={(model) => handleDeleteModel(provider, model)}

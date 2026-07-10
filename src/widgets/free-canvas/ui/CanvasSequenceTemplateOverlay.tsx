@@ -16,6 +16,7 @@ import {
 type Props = {
   element: CanvasTemplateElement;
   viewport: CanvasViewport;
+  currentProjectId: string | null;
   imageModelEntry?: CanvasModelEntry;
   onSelect: () => void;
   onMove: (updates: Pick<CanvasTemplateElement, "x" | "y">) => void;
@@ -81,6 +82,7 @@ function inferSourceFrameUrl(frame: RepairableFrame | undefined): string {
 export function CanvasSequenceTemplateOverlay({
   element,
   viewport,
+  currentProjectId,
   imageModelEntry,
   onSelect,
   onMove,
@@ -197,6 +199,7 @@ export function CanvasSequenceTemplateOverlay({
       }
       const rawSrc = await requestCanvasImageGeneration({
         prompt: AI_REPAIR_PROMPT,
+        projectId: currentProjectId,
         referenceImageUrls: references.urls,
         provider: imageModelEntry.provider,
         model: imageModelEntry.model,

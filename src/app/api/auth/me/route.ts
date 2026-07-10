@@ -47,7 +47,7 @@ export async function PATCH(request: Request) {
       name?: string;
       avatarUrl?: string;
     };
-    const result = updateCurrentUserProfile({
+    const result = await updateCurrentUserProfile({
       userId: session.userId,
       name: body.name || "",
       avatarUrl: body.avatarUrl,

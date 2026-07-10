@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     }
 
     const { hash, salt } = await hashPassword(password);
-    setUserPassword(session.userId, hash, salt);
+    await setUserPassword(session.userId, hash, salt);
 
     return NextResponse.json({ success: true, message: "密码设置成功" });
   } catch (err) {

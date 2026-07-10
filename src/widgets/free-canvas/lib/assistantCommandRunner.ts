@@ -1,21 +1,16 @@
-import { createTextElement } from "@/entities/canvas/lib/factory";
 import type {
   CanvasEdge,
   CanvasElement,
-  CanvasTextElement,
 } from "@/entities/canvas/model/types";
-import {
-  type CanvasWorkflowStrategy,
-} from "@/features/canvas-workflows";
 import {
   runCanvasBrainTurn,
   type CanvasActionIntent,
+  type CanvasAssetWorkflowKind,
   type CanvasModelEntry,
 } from "@/features/canvas-brain";
-import type { CanvasBrainChatMessage } from "../ui/CanvasBrainPanel";
 import type { CanvasExecutionOptions } from "./textGeneration";
 import { mergeElementsWithUpdates } from "./textGeneration";
-import type { CanvasSnapshot } from "../model/types";
+import type { CanvasBrainChatMessage, CanvasSnapshot } from "../model/types";
 
 type CanvasCommitInput =
   | { elements?: CanvasElement[]; edges?: CanvasEdge[] }
@@ -30,116 +25,29 @@ export async function runCanvasAssistantCommand(params: {
   command: string;
   display: string;
   history: CanvasBrainChatMessage[];
-  workflowStrategy: CanvasWorkflowStrategy;
   elements: CanvasElement[];
   edges: CanvasEdge[];
   selectedElement: CanvasElement | null;
   brainAttachmentIds: string[];
+  currentProjectId: string | null;
   activeBrainModelEntry?: CanvasModelEntry;
   center: () => { x: number; y: number };
   appendAssistantMessage: (
     message: string | Pick<CanvasBrainChatMessage, "content" | "actions">,
   ) => void;
   clearBrainAttachments: () => void;
-  addElement: (element: CanvasElement) => void;
   commitCanvas: (next: CanvasCommitInput) => void;
   setSelectedId: (id: string | null) => void;
+  runAssetWorkflow?: (params: {
+    workflow: CanvasAssetWorkflowKind;
+    command: string;
+  }) => Promise<boolean>;
   generateFromSelectedNode: (
     element: CanvasElement,
     instructionOverride?: string,
     options?: CanvasExecutionOptions,
   ) => Promise<void>;
 }): Promise<void> {
-  const workflowResult = await params.workflowStrategy.handleWorkflowAction({
-    command: params.command,
-    elements: params.elements,
-    edges: params.edges,
-    center: params.center(),
-    history: params.history,
-  });
-  if (workflowResult.handled) {
-    const hasGenerationJobs = Boolean(workflowResult.generationJobs?.length);
-    let plannedElements = params.elements;
-    let plannedEdges = params.edges;
-
-    if (
-      !hasGenerationJobs &&
-      (workflowResult.elements?.length || workflowResult.edges?.length)
-    ) {
-      plannedElements = mergeElementsWithUpdates({
-        currentElements: params.elements,
-        plannedElements: [
-          ...params.elements,
-          ...(workflowResult.elements || []),
-        ],
-      });
-      plannedEdges = [
-        ...params.edges,
-        ...(workflowResult.edges || []).filter(
-          (nextEdge) =>
-            !params.edges.some(
-              (edge) =>
-                edge.sourceId === nextEdge.sourceId &&
-                edge.targetId === nextEdge.targetId,
-            ),
-        ),
-      ];
-
-      params.commitCanvas({
-        elements: plannedElements,
-        edges: plannedEdges,
-      });
-    }
-
-    if (workflowResult.selectedElementId && !hasGenerationJobs) {
-      params.setSelectedId(workflowResult.selectedElementId);
-    }
-    params.appendAssistantMessage(workflowResult.message);
-
-    for (const job of workflowResult.generationJobs || []) {
-      const target =
-        workflowResult.elements?.find((element) => element.id === job.elementId) ||
-        params.elements.find((element) => element.id === job.elementId);
-      if (!target) continue;
-      const jobEdges = [
-        ...params.edges,
-        ...(workflowResult.edges || []).filter(
-          (edge) =>
-            edge.targetId === target.id &&
-            params.elements.some((element) => element.id === edge.sourceId),
-        ),
-      ];
-      const jobElements = mergeElementsWithUpdates({
-        currentElements: params.elements,
-        plannedElements: [...params.elements, target],
-      });
-
-      await params.generateFromSelectedNode(target, job.instruction, {
-        resultTextRole: job.resultTextRole,
-        generationMode: job.generationMode,
-        actionId: job.actionId,
-        actionLabel: job.actionLabel,
-        doneMessage: job.doneMessage,
-        silent: job.silent,
-        baseElements: jobElements,
-        baseEdges: jobEdges,
-        intentOverride: {
-          outputKind: "text",
-          placement: "update_current",
-          instruction: job.instruction,
-        },
-      });
-      params.setSelectedId(target.id);
-    }
-    if (workflowResult.completionMessage) {
-      params.appendAssistantMessage({
-        content: workflowResult.completionMessage,
-        actions: workflowResult.actions,
-      });
-    }
-    return;
-  }
-
   let plannedInstruction = params.command;
   let targetElement: CanvasElement | null = null;
   let plannedIntent: CanvasActionIntent | undefined;
@@ -163,6 +71,7 @@ export async function runCanvasAssistantCommand(params: {
       elements: params.elements,
       edges: params.edges,
       focusIds,
+      projectId: params.currentProjectId,
       selectedElement: params.selectedElement,
       center: params.center(),
       provider: params.activeBrainModelEntry.provider,
@@ -175,6 +84,13 @@ export async function runCanvasAssistantCommand(params: {
     }
 
     const preparedAction = brainResult.action;
+    if (brainResult.plan.assetWorkflow && params.runAssetWorkflow) {
+      const handled = await params.runAssetWorkflow({
+        workflow: brainResult.plan.assetWorkflow,
+        command: params.command,
+      });
+      if (handled) return;
+    }
 
     if (preparedAction.createdSourceElements.length > 0) {
       params.commitCanvas((current) => ({
@@ -197,15 +113,25 @@ export async function runCanvasAssistantCommand(params: {
   }
 
   if (!targetElement && !params.activeBrainModelEntry) {
-    params.appendAssistantMessage("请先在右下角选择可用的文本模型作为画布大脑。");
+    params.appendAssistantMessage("请先选择可用的文本模型。");
     return;
   }
 
   if (targetElement) {
+    const resultIntent =
+      params.selectedElement &&
+      plannedIntent?.outputKind === "text" &&
+      plannedIntent.placement === "update_current"
+        ? {
+            ...plannedIntent,
+            placement: "create_result" as const,
+          }
+        : plannedIntent;
+
     params.setSelectedId(targetElement.id);
     params.appendAssistantMessage(
       params.selectedElement
-        ? "参考选中素材继续处理。"
+        ? "基于选中素材生成新版本。"
         : "参考画布里最相关的素材继续处理。",
     );
     await params.generateFromSelectedNode(targetElement, plannedInstruction, {
@@ -213,7 +139,7 @@ export async function runCanvasAssistantCommand(params: {
       extraSourceElements: plannedSourceElements.filter(
         (source) => source.id !== targetElement?.id,
       ),
-      intentOverride: plannedIntent,
+      intentOverride: resultIntent,
       baseElements: plannedElements,
       baseEdges: params.edges,
     });
@@ -221,12 +147,5 @@ export async function runCanvasAssistantCommand(params: {
     return;
   }
 
-  const element = {
-    ...createTextElement(params.center()),
-    text: "",
-    prompt: params.command,
-  } satisfies CanvasTextElement;
-  params.addElement(element);
-  params.appendAssistantMessage("我先把你的想法整理成一个文本素材。");
-  await params.generateFromSelectedNode(element, plannedInstruction);
+  params.appendAssistantMessage("我还没有找到可以承接这次操作的素材，可以说清楚要生成什么。");
 }

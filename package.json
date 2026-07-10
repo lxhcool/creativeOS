@@ -3,15 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1 --port 3210",
     "dev:clean": "bash scripts/dev-clean.sh",
-    "build": "next build",
-    "start": "next start",
+    "build": "prisma generate && next build",
+    "start": "next start --hostname 127.0.0.1 --port 3210",
+    "prisma:generate": "prisma generate",
+    "db:push": "prisma db push",
     "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "@langchain/langgraph": "^1.4.1",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "@radix-ui/react-popover": "^1.1.18",
     "@radix-ui/react-scroll-area": "^1.2.13",
     "dexie": "latest",
@@ -19,23 +23,25 @@
     "lucide-react": "^1.17.0",
     "nanoid": "latest",
     "next": "latest",
+    "pg": "^8.22.0",
     "react": "^19.0.0",
     "react-colorful": "^5.7.0",
     "react-dom": "^19.0.0",
     "react-konva": "^19.2.5",
-    "resend": "^6.12.4",
     "zod": "latest",
     "zustand": "latest"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
+    "@types/pg": "^8.20.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",
     "eslint-config-next": "latest",
     "fake-indexeddb": "^6.2.5",
     "postcss": "latest",
+    "prisma": "^7.8.0",
     "tailwindcss": "latest",
     "typescript": "latest"
   }

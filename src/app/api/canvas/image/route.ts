@@ -2,58 +2,77 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ModelGateway } from "@/services/model/gateway";
 import type { ModelGatewayConfig } from "@/services/model/types";
+import {
+  isDataUrl,
+  persistCanvasDataUrlAsset,
+} from "@/lib/canvas-asset-storage";
+import { createCanvasAssetFileRecord } from "@/lib/canvas-asset-file-store";
+import { getSession } from "@/lib/session-store";
 import { toCanvasGenerationErrorMessage } from "../lib/errors";
+import {
+  canvasImageModelSchema,
+  canvasProviderSchema,
+  canvasTextModelSchema,
+  toRuntimeProviderType,
+  type CanvasProviderInput,
+} from "../lib/modelRequest";
 
 export const maxDuration = 900;
 
-const providerSchema = z.object({
-  id: z.string().min(1),
-  type: z.enum([
-    "openai",
-    "litellm",
-    "openrouter",
-    "openai_compatible",
-  ]),
-  baseUrl: z.string().min(1),
-  apiKey: z.string().optional(),
-});
-
-const modelSchema = z.object({
-  kind: z.literal("image"),
-  modelName: z.string().min(1),
-  capabilities: z.array(z.string()).default(["image"]),
-  endpoint: z.string().optional(),
-  options: z.string().optional(),
-});
-
-const promptModelSchema = z.object({
-  kind: z.literal("text"),
-  modelName: z.string().min(1),
-  capabilities: z.array(z.string()).default(["text"]),
-  contextWindow: z.number().optional(),
-  maxOutputTokens: z.number().optional(),
-});
-
 const requestSchema = z.object({
   prompt: z.string().min(1),
+  projectId: z.string().optional(),
   referenceImageUrls: z.array(z.string().min(1)).default([]),
-  provider: providerSchema,
-  model: modelSchema,
-  promptProvider: providerSchema.optional(),
-  promptModel: promptModelSchema.optional(),
+  provider: canvasProviderSchema,
+  model: canvasImageModelSchema,
+  promptProvider: canvasProviderSchema.optional(),
+  promptModel: canvasTextModelSchema.optional(),
 });
 
-function toRuntimeProviderType(type: z.infer<typeof providerSchema>["type"]) {
-  return type === "litellm" || type === "openrouter" ? "openai_compatible" : type;
-}
-
 type ImageRouteBody = z.infer<typeof requestSchema>;
+
+async function persistGeneratedImageIfNeeded<T extends { src: string; mimeType: string }>(
+  result: T,
+  projectId?: string | null,
+): Promise<T> {
+  if (!isDataUrl(result.src)) return result;
+
+  const session = await getSession();
+  if (!session) return result;
+
+  const stored = await persistCanvasDataUrlAsset({
+    dataUrl: result.src,
+    userId: session.userId,
+    fallbackMimeType: result.mimeType,
+  });
+  await createCanvasAssetFileRecord({
+    ownerId: `user:${session.userId}`,
+    projectId,
+    url: stored.url,
+    storageKey: stored.storageKey,
+    kind: "image",
+    mimeType: stored.mimeType,
+    size: stored.size,
+  });
+
+  return {
+    ...result,
+    src: stored.url,
+    mimeType: stored.mimeType,
+    metadata: {
+      ...("metadata" in result && result.metadata && typeof result.metadata === "object"
+        ? result.metadata
+        : {}),
+      storedAs: "local_file",
+    },
+  };
+}
 
 function buildProviderConfigs(body: ImageRouteBody): ModelGatewayConfig["providers"] {
   const providerMap = new Map<string, ModelGatewayConfig["providers"][number]>();
 
   const upsertProvider = (
-    provider: z.infer<typeof providerSchema>,
+    provider: CanvasProviderInput,
     model: ModelGatewayConfig["providers"][number]["models"][number],
   ) => {
     const existing = providerMap.get(provider.id);
@@ -178,7 +197,7 @@ export async function POST(request: Request) {
         },
       });
 
-      return NextResponse.json(result);
+      return NextResponse.json(await persistGeneratedImageIfNeeded(result, body.projectId));
     } catch (directError) {
       if (
         !promptModelRef ||
@@ -209,7 +228,9 @@ export async function POST(request: Request) {
         },
       });
 
-      return NextResponse.json(fallbackResult);
+      return NextResponse.json(
+        await persistGeneratedImageIfNeeded(fallbackResult, body.projectId),
+      );
     }
   } catch (error) {
     const message = toCanvasGenerationErrorMessage(error, "image");

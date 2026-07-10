@@ -1,11 +1,9 @@
 import {
-  BookOpen,
   ChevronRight,
   Clapperboard,
   FileInput,
   FileText,
   Image as ImageIcon,
-  ListTree,
   Music,
   PenLine,
   Settings,
@@ -41,51 +39,6 @@ const TEXT_MENU_ITEMS: TextMenuItem[] = [
     role: "article",
     icon: <FileText className="h-4 w-4" />,
     description: "文章、观点、长内容",
-  },
-  {
-    role: "novel_setup",
-    icon: <BookOpen className="h-4 w-4" />,
-    description: "类型、读者、卖点、风格",
-  },
-  {
-    role: "novel_core",
-    icon: <BookOpen className="h-4 w-4" />,
-    description: "梗概、目标、冲突、情绪线",
-  },
-  {
-    role: "novel_world",
-    icon: <ListTree className="h-4 w-4" />,
-    description: "背景、规则、势力、名词表",
-  },
-  {
-    role: "novel_outline",
-    icon: <ListTree className="h-4 w-4" />,
-    description: "全书主线、阶段、结局",
-  },
-  {
-    role: "novel_volume_outline",
-    icon: <ListTree className="h-4 w-4" />,
-    description: "分卷目标、转折、卷末钩子",
-  },
-  {
-    role: "novel_chapter_outline",
-    icon: <ListTree className="h-4 w-4" />,
-    description: "本章目标、冲突、钩子",
-  },
-  {
-    role: "novel_chapter",
-    icon: <BookOpen className="h-4 w-4" />,
-    description: "章节正文、续写",
-  },
-  {
-    role: "novel_bible",
-    icon: <FileText className="h-4 w-4" />,
-    description: "时间线、伏笔、设定一致性",
-  },
-  {
-    role: "novel_style_guide",
-    icon: <PenLine className="h-4 w-4" />,
-    description: "句式、对白、节奏、禁用词",
   },
   {
     role: "character_cast",

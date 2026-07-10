@@ -71,20 +71,8 @@ export function getNextTextChapterNo(params: {
   resultTextRole: CanvasTextRole;
   instruction: string;
 }): number | undefined {
-  if (
-    params.resultTextRole !== "novel_chapter" &&
-    params.resultTextRole !== "novel_chapter_outline"
-  ) {
-    return undefined;
-  }
-  if (params.source.kind !== "text") return undefined;
-
-  const sourceChapterNo = params.source.meta?.chapterNo;
-  if (/下一章|下章|next chapter/i.test(params.instruction)) {
-    return typeof sourceChapterNo === "number" ? sourceChapterNo + 1 : undefined;
-  }
-  if (typeof sourceChapterNo === "number") return sourceChapterNo;
-  return 1;
+  void params;
+  return undefined;
 }
 
 function getCanvasTextResultSiblingSlot(index: number): number {
@@ -96,28 +84,6 @@ function getCanvasTextResultSiblingSlot(index: number): number {
 const TEXT_RESULT_COLUMN_GAP = 360;
 const TEXT_RESULT_ROW_GAP = 180;
 const TEXT_RESULT_SUPPORT_GAP = 92;
-
-export const NOVEL_REQUIRED_OUTLINE_SUPPORT_MATERIALS = [
-  {
-    actionId: "outline_auto_relation",
-    title: "人物关系",
-    role: "character_relation",
-    instruction:
-      "请基于当前角色总表，并参考故事大纲，生成人物关系。整理主要角色之间的立场、利益、情感联系、秘密、冲突点和剧情用途。不要写成角色档案或正文。",
-  },
-  {
-    actionId: "outline_auto_character",
-    title: "核心角色卡",
-    role: "character",
-    instruction:
-      "请基于当前角色总表，并参考故事大纲，生成最关键角色的单人角色卡，包含身份、外貌、性格、背景、目标、弱点、关键关系和人物弧光。只写一个核心角色。",
-  },
-] satisfies Array<{
-  actionId: string;
-  title: string;
-  role: CanvasTextRole;
-  instruction: string;
-}>;
 
 function getCanvasHierarchicalTextResultPosition(params: {
   elements: CanvasElement[];
@@ -174,20 +140,11 @@ export function getCanvasTextResultRelationKind(params: {
   if (params.source.kind !== "text") return "child";
 
   const sourceRole = getCanvasTextRole(params.source.textRole);
-  const isNextChapterOutline =
-    params.actionId === "chapter_outline_next" &&
-    sourceRole === "novel_chapter_outline" &&
-    params.resultTextRole === "novel_chapter_outline";
-  const isNextChapter =
-    params.actionId === "chapter_next" &&
-    sourceRole === "novel_chapter" &&
-    params.resultTextRole === "novel_chapter";
   const isCharacterSupport =
     sourceRole === "character_cast" &&
     (params.resultTextRole === "character_relation" ||
       params.resultTextRole === "character");
 
-  if (isNextChapterOutline || isNextChapter) return "sequence";
   if (isCharacterSupport) return "support";
   return "child";
 }
@@ -210,16 +167,7 @@ function getCanvasTextResultLayoutKind(params: {
 }): CanvasTextResultLayoutKind {
   if (params.source.kind !== "text") return "hierarchical";
 
-  const sourceRole = getCanvasTextRole(params.source.textRole);
   const relationKind = getCanvasTextResultRelationKind(params);
-
-  if (
-    params.actionId === "chapter_outline_write" &&
-    sourceRole === "novel_chapter_outline" &&
-    params.resultTextRole === "novel_chapter"
-  ) {
-    return "chapter_draft";
-  }
 
   if (relationKind === "sequence") return "sequence";
   if (relationKind === "support") return "support";
@@ -333,7 +281,6 @@ function getCanvasChapterDraftTextResultPosition(params: {
     (element): element is CanvasTextElement =>
       element.kind === "text" &&
       element.id !== params.source.id &&
-      getCanvasTextRole(element.textRole) === "novel_chapter" &&
       (element.meta?.parentNodeId === params.source.id ||
         element.meta?.sourceNodeId === params.source.id ||
         directChildIds.has(element.id)),
@@ -398,13 +345,6 @@ export function shouldIgnoreCanvasLayoutEdge(params: {
   edge: CanvasEdge;
   target?: CanvasElement;
 }): boolean {
-  if (params.target?.kind !== "text") return false;
-
-  const target = params.target as CanvasTextElement;
-  return (
-    getCanvasTextRole(target.textRole) === "novel_chapter_outline" &&
-    target.meta?.sourceRole === "novel_chapter_outline" &&
-    !!target.meta.sourceNodeId &&
-    params.edge.sourceId !== target.meta.sourceNodeId
-  );
+  void params;
+  return false;
 }

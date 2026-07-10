@@ -24,6 +24,7 @@ type CanvasCommitInput =
 export function useCanvasGenerationController(params: {
   elements: CanvasElement[];
   edges: CanvasEdge[];
+  currentProjectId: string | null;
   flowDirection: CanvasFlowDirection;
   getModelEntryByRef: (
     modelRef: string | undefined,
@@ -62,6 +63,7 @@ export function useCanvasGenerationController(params: {
           options,
           elements: params.elements,
           edges: params.edges,
+          currentProjectId: params.currentProjectId,
           flowDirection: params.flowDirection,
           getModelEntryByRef: params.getModelEntryByRef,
           getModelEntryForKind: params.getModelEntryForKind,
@@ -105,6 +107,7 @@ export function useCanvasGenerationController(params: {
         modelEntry,
         elements: params.elements,
         edges: params.edges,
+        currentProjectId: params.currentProjectId,
         flowDirection: params.flowDirection,
         commitCanvas: params.commitCanvas,
         patchElementDraft: params.patchElementDraft,

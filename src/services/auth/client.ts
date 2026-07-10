@@ -12,11 +12,6 @@ export interface AuthErrorResponse {
 
 export type AuthApiResponse = AuthSuccessResponse | AuthErrorResponse;
 
-export interface CodeRequestResponse {
-  success: boolean;
-  message: string;
-}
-
 export interface SessionResponse {
   authenticated: boolean;
   user: User | null;
@@ -29,19 +24,6 @@ async function parseJson<T>(response: Response): Promise<T> {
 export async function fetchSession(): Promise<SessionResponse> {
   const response = await fetch("/api/auth/me");
   return parseJson<SessionResponse>(response);
-}
-
-export async function requestAuthCode(params: {
-  email: string;
-  purpose: "login" | "register";
-}): Promise<CodeRequestResponse> {
-  const response = await fetch("/api/auth/email/code", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-
-  return parseJson<CodeRequestResponse>(response);
 }
 
 export async function loginWithPassword(params: {
@@ -57,24 +39,10 @@ export async function loginWithPassword(params: {
   return parseJson<AuthApiResponse>(response);
 }
 
-export async function loginWithCode(params: {
-  email: string;
-  code: string;
-}): Promise<AuthApiResponse> {
-  const response = await fetch("/api/auth/email/verify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-
-  return parseJson<AuthApiResponse>(response);
-}
-
-export async function registerWithCode(params: {
+export async function registerWithPassword(params: {
   name: string;
   email: string;
   password: string;
-  code: string;
 }): Promise<AuthApiResponse> {
   const response = await fetch("/api/auth/register", {
     method: "POST",

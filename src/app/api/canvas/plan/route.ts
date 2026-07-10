@@ -1,29 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ModelGateway } from "@/services/model/gateway";
-import type { ModelGatewayConfig } from "@/services/model/types";
-
-const providerSchema = z.object({
-  id: z.string().min(1),
-  type: z.enum([
-    "openai",
-    "anthropic",
-    "google",
-    "litellm",
-    "openrouter",
-    "openai_compatible",
-  ]),
-  baseUrl: z.string().min(1),
-  apiKey: z.string().optional(),
-});
-
-const modelSchema = z.object({
-  kind: z.literal("text"),
-  modelName: z.string().min(1),
-  capabilities: z.array(z.string()).default(["text"]),
-  contextWindow: z.number().optional(),
-  maxOutputTokens: z.number().optional(),
-});
+import {
+  buildSingleModelGatewayConfig,
+  canvasProviderSchema,
+  canvasTextModelSchema,
+} from "../lib/modelRequest";
+import {
+  listCanvasMemoriesForPlan,
+  type CanvasMemoryRecord,
+} from "@/lib/canvas-memory-store";
+import { getCanvasOwnerId } from "@/lib/canvas-project-store";
 
 const nodeSchema = z.object({
   id: z.string().min(1),
@@ -39,6 +26,7 @@ const edgeSchema = z.object({
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
+  projectId: z.string().optional(),
   history: z
     .array(
       z.object({
@@ -50,12 +38,30 @@ const requestSchema = z.object({
   nodes: z.array(nodeSchema).default([]),
   edges: z.array(edgeSchema).default([]),
   focusIds: z.array(z.string()).default([]),
-  provider: providerSchema,
-  model: modelSchema,
+  provider: canvasProviderSchema,
+  model: canvasTextModelSchema,
 });
 
 const planSchema = z.object({
   mode: z.enum(["chat", "action"]).default("action"),
+  intentType: z
+    .enum(["create_asset", "modify_asset", "ask_question", "navigate_canvas", "unclear"])
+    .default("unclear"),
+  confidence: z.number().min(0).max(1).default(0.7),
+  assetWorkflow: z
+    .enum([
+      "image",
+      "video",
+      "novel",
+      "novel_chapter",
+      "article",
+      "character",
+      "script",
+      "storyboard",
+      "novel_merge_updates",
+      "consistency_check",
+    ])
+    .optional(),
   sourceIds: z.array(z.string()).default([]),
   createdSources: z
     .array(
@@ -92,11 +98,79 @@ const planSchema = z.object({
   }
 });
 
-function toRuntimeProviderType(type: z.infer<typeof providerSchema>["type"]) {
-  return type === "litellm" || type === "openrouter" ? "openai_compatible" : type;
+function summarizeMemoryContent(content: unknown): string {
+  if (!content || typeof content !== "object") return "";
+
+  const value = content as {
+    title?: string;
+    text?: string;
+    items?: Array<{
+      id?: string;
+      kind?: string;
+      title?: string;
+      assetType?: string;
+      assetStatus?: string;
+      excerpt?: string;
+    }>;
+    assetCount?: number;
+    nodeCount?: number;
+    edgeCount?: number;
+  };
+
+  if (typeof value.text === "string") {
+    return [
+      value.title ? `标题=${value.title}` : "",
+      value.text.slice(0, 1400),
+    ].filter(Boolean).join("\n");
+  }
+
+  if (Array.isArray(value.items)) {
+    const header = [
+      typeof value.nodeCount === "number" ? `节点 ${value.nodeCount}` : "",
+      typeof value.edgeCount === "number" ? `连线 ${value.edgeCount}` : "",
+      typeof value.assetCount === "number" ? `资产 ${value.assetCount}` : "",
+    ].filter(Boolean).join("，");
+    const items = value.items
+      .slice(0, 24)
+      .map((item, index) =>
+        [
+          `${index + 1}. ${item.title || item.id || "未命名"}`,
+          item.kind ? `kind=${item.kind}` : "",
+          item.assetType ? `asset=${item.assetType}` : "",
+          item.assetStatus ? `status=${item.assetStatus}` : "",
+          item.excerpt ? `内容=${item.excerpt}` : "",
+        ]
+          .filter(Boolean)
+          .join(" | "),
+      )
+      .join("\n");
+
+    return [header, items].filter(Boolean).join("\n");
+  }
+
+  return JSON.stringify(content).slice(0, 1600);
 }
 
-function buildPrompt(params: z.infer<typeof requestSchema>): string {
+function buildMemoryText(memories: CanvasMemoryRecord[]): string {
+  return memories
+    .map((memory, index) =>
+      [
+        `${index + 1}. ${memory.title}`,
+        `type=${memory.type}`,
+        memory.sourceElementIds.length > 0
+          ? `sourceElementIds=${memory.sourceElementIds.join(",")}`
+          : "",
+        summarizeMemoryContent(memory.content),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    )
+    .join("\n\n");
+}
+
+function buildPrompt(params: z.infer<typeof requestSchema> & {
+  memories: CanvasMemoryRecord[];
+}): string {
   const nodeText = params.nodes
     .map((node, index) => {
       const content = node.content?.trim();
@@ -118,12 +192,20 @@ function buildPrompt(params: z.infer<typeof requestSchema>): string {
     .slice(-8)
     .map((message) => `${message.role === "user" ? "用户" : "大脑"}：${message.content}`)
     .join("\n");
+  const memoryText = buildMemoryText(params.memories);
 
   return [
     "你是 CreativeOS 自由画布的大脑。你负责根据整个画布的素材状态和用户目标，选择参与节点，并给出下一步执行计划。",
     "先判断用户是在普通对话还是要求操作画布。普通对话、解释、建议、确认、闲聊、询问能力、讨论方案时，返回 mode=chat，并在 response 中直接中文回复，不要创建或修改画布。",
     "只有用户明确要求创建、生成、修改、删除、整理、导入、连接、更新画布素材时，才返回 mode=action。",
+    "同时返回 intentType 和 confidence。intentType 只能是 create_asset、modify_asset、ask_question、navigate_canvas、unclear。",
+    "如果无法判断用户要做什么，返回 mode=chat、intentType=unclear、confidence 低于 0.65，并用 response 简短追问。",
+    "如果用户只是问普通问题或外部问题，返回 mode=chat、intentType=ask_question，不要写入画布。",
     "如果用户要求生成图片、视频、音频或文本素材，不要在 chat response 中声称已经生成、已完成或已放到画布上，必须返回 mode=action 交给执行器处理。",
+    "如果 action 需要启动一个多节点资产链，返回 assetWorkflow：生图=image，视频=video，小说基础设定=novel，小说章节=novel_chapter，文章=article，角色=character，剧本=script，分镜=storyboard，合并小说章节后的增量更新=novel_merge_updates，一致性检查=consistency_check。",
+    "assetWorkflow 只用于明确创作、生成、检查素材时；用户只是问流程、问概念、问建议时不要返回 assetWorkflow，应该返回 mode=chat。",
+    "没有选中素材时，如果用户明确要求生成图片、视频、小说、章节、文章、角色、剧本或分镜，优先使用 assetWorkflow 让执行器生成对应资产链。",
+    "选中素材时，如果用户要求修改、润色、扩写、改写或基于当前素材生成新版本，一般不要返回 assetWorkflow，使用通用 action 即可；一致性检查例外，可以返回 consistency_check。",
     "summary 和 question 必须使用中文，语气简短直接。",
     "instruction 和 summary 是给用户与执行器看的自然语言，不要出现 schema 字段名或内部实现词，例如 createdSources、sourceIds、outputKind、placement。",
     "用户当前输入可能是对你上一轮澄清问题的简短回答。必须结合对话历史重建完整目标，不要只根据当前一句话重新提问。",
@@ -133,6 +215,8 @@ function buildPrompt(params: z.infer<typeof requestSchema>): string {
     "决策优先级：如果用户没有明确选择节点，应优先使用连线关系判断上下文；同一连通关系内的节点优先于全画布搜索。",
     "focusIds 是用户当前明确选中或上传给大脑的重点素材。除非用户明确排除，否则它们优先作为 sourceIds 参与本次计划。",
     "sourceIds 应该选择真正参与这次操作的素材节点。多个 sourceIds 表示这些素材共同参与。",
+    "项目记忆是长期上下文，只用于理解用户意图和选择相关素材；不要把项目记忆当成用户当前明确要求。",
+    "如果项目记忆显示某些设定、角色、章节或资产已经存在，应优先复用或基于它们生成新版本，不要无视既有内容重新开始。",
     "如果用户目标里同时包含可作为素材保存的内容和要生成的目标，但画布中没有合适来源节点，应在 createdSources 中创建 text 素材，content 填入要保存的素材正文。",
     "如果有多个互不相连的候选素材组都可能符合用户目标，不要猜，设置 needsClarification=true 并给出简短 question。",
     "只有缺少执行所必需的信息时才澄清；如果用户已经通过历史对话补充了缺失变量，应直接计划执行。",
@@ -140,6 +224,7 @@ function buildPrompt(params: z.infer<typeof requestSchema>): string {
     "action 模式下，placement 表示结果位置。修改已有素材用 update_current；需要保留素材并产生新结果用 create_result；如果没有有效素材承接，可以 update_current 到新建文本素材。",
     nodeText ? `画布节点：\n${nodeText}` : "画布为空。",
     edgeText ? `节点关系：\n${edgeText}` : "没有节点关系。",
+    memoryText ? `项目记忆：\n${memoryText}` : "没有项目记忆。",
     focusText ? `当前重点素材 id：${focusText}` : "没有当前重点素材。",
     historyText ? `最近对话：\n${historyText}` : "没有最近对话。",
     `用户目标：\n${params.prompt}`,
@@ -178,7 +263,7 @@ async function requestPlanWithChatFallback(params: {
       },
       {
         role: "user",
-        content: `${params.prompt}\n\nJSON schema: { mode: 'chat'|'action', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }`,
+        content: `${params.prompt}\n\nJSON schema: { mode: 'chat'|'action', intentType: 'create_asset'|'modify_asset'|'ask_question'|'navigate_canvas'|'unclear', confidence: number, assetWorkflow?: 'image'|'video'|'novel'|'novel_chapter'|'article'|'character'|'script'|'storyboard'|'novel_merge_updates'|'consistency_check', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }`,
       },
     ],
     temperature: 0,
@@ -199,7 +284,7 @@ function sanitizePlannerError(error: unknown): string {
   if (/All JSON generation models failed/i.test(message)) {
     const reason = message.match(/Reasons:\s*(.+)$/)?.[1];
     if (reason) return reason.replace(/^.*?:\s*/, "");
-    return "画布大脑没有返回可用规划，请重试或切换文本模型。";
+    return "创作输入没有返回可用规划，请重试或切换文本模型。";
   }
 
   return message || "画布规划失败";
@@ -215,39 +300,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const config: ModelGatewayConfig = {
-      providers: [
-        {
-          id: body.provider.id,
-          name: body.provider.id,
-          type: toRuntimeProviderType(body.provider.type),
-          enabled: true,
-          baseUrl: body.provider.baseUrl.replace(/\/+$/, ""),
-          apiKey: body.provider.apiKey,
-          models: [
-            {
-              id: body.model.modelName,
-              capabilities: body.model.capabilities as ModelGatewayConfig["providers"][number]["models"][number]["capabilities"],
-              contextWindow: body.model.contextWindow,
-              maxOutputTokens: body.model.maxOutputTokens,
-            },
-          ],
-        },
-      ],
-      routing: {
-        canvas_plan: [`${body.provider.id}:${body.model.modelName}`],
-      },
-    };
-
-    const gateway = new ModelGateway(config);
-    const prompt = buildPrompt(body);
+    const gateway = new ModelGateway(buildSingleModelGatewayConfig({
+      task: "canvas_plan",
+      provider: body.provider,
+      model: body.model,
+    }));
+    const ownerId = await getCanvasOwnerId();
+    const memories = await listCanvasMemoriesForPlan({
+      ownerId,
+      projectId: body.projectId || null,
+      query: body.prompt,
+      focusIds: body.focusIds,
+    });
+    const prompt = buildPrompt({ ...body, memories });
 
     try {
       const result = await gateway.generateJson({
         task: "canvas_plan",
         schema: planSchema,
         schemaDescription:
-          "{ mode: 'chat'|'action', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }",
+          "{ mode: 'chat'|'action', intentType: 'create_asset'|'modify_asset'|'ask_question'|'navigate_canvas'|'unclear', confidence: number, assetWorkflow?: 'image'|'video'|'novel'|'novel_chapter'|'article'|'character'|'script'|'storyboard'|'novel_merge_updates'|'consistency_check', response?: string, sourceIds: string[], createdSources: Array<{ kind: 'text', content: string }>, outputKind?: 'text'|'image'|'video'|'audio', placement?: 'update_current'|'create_result', instruction?: string, summary?: string, needsClarification?: boolean, question?: string }",
         systemPrompt: "你是 CreativeOS 自由画布的大脑，只输出 JSON。",
         prompt,
         temperature: 0,
